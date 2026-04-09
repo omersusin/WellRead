@@ -94,18 +94,32 @@ class LibraryViewModel @Inject constructor(
     fun importFile(uri: Uri, mimeType: String?) {
         viewModelScope.launch {
             _uiState.update { it.copy(isImporting = true, importError = null) }
+
+            val uriStr = uri.toString().lowercase()
+            val isPdf = mimeType?.contains("pdf") == true || uriStr.contains(".pdf")
+            val isEpub = mimeType?.contains("epub") == true || uriStr.contains(".epub")
+
             val result = when {
-                mimeType == "application/pdf" || uri.toString().endsWith(".pdf") ->
-                    fileParser.parsePdf(uri)
-                mimeType == "text/plain" || uri.toString().endsWith(".txt") ->
-                    fileParser.parseTxt(uri)
-                else -> fileParser.parseTxt(uri)
+                isPdf  -> fileParser.parsePdf(uri)
+                isEpub -> fileParser.parseEpub(uri)
+                else   -> fileParser.parseTxt(uri)
             }
+
             when (result) {
                 is ParseResult.Success -> {
-                    val type = if (mimeType == "application/pdf") BookType.PDF else BookType.TXT
-                    val title = uri.lastPathSegment?.removeSuffix(".pdf")?.removeSuffix(".txt")
+                    val type = when {
+                        isPdf  -> BookType.PDF
+                        isEpub -> BookType.EPUB
+                        else   -> BookType.TXT
+                    }
+                    val rawName = uri.lastPathSegment
+                        ?.substringAfterLast("/")
+                        ?.substringAfterLast("%2F")
                         ?: "Imported Book"
+                    val title = rawName
+                        .removeSuffix(".pdf").removeSuffix(".epub").removeSuffix(".txt")
+                        .replace("%20", " ").trim()
+                        .ifBlank { "Imported Book" }
                     bookRepository.insertBook(
                         Book(
                             title = title,

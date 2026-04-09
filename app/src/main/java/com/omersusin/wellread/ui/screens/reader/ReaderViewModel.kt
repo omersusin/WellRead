@@ -88,78 +88,72 @@ class ReaderViewModel @Inject constructor(
 
         _uiState.update { it.copy(book = book) }
 
-        val text = when (book.type) {
-            BookType.WEB -> fetchWebText(book.sourceUrl)
-            BookType.PDF -> fetchFileText(book.filePath, "PDF")
+        val result = when (book.type) {
+            BookType.WEB -> {
+                if (book.sourceUrl.isBlank()) {
+                    ParseResult.Error("No web URL saved for this book")
+                } else {
+                    when (val r = webImporter.importFromUrl(book.sourceUrl)) {
+                        is WebImportResult.Success -> ParseResult.Success(r.text, TextProcessor.countWords(r.text))
+                        is WebImportResult.Error   -> ParseResult.Error(r.message)
+                    }
+                }
+            }
+            BookType.PDF  -> fetchFileText(book.filePath, "PDF")
             BookType.EPUB -> fetchFileText(book.filePath, "EPUB")
-            BookType.TXT -> fetchFileText(book.filePath, "TXT")
+            BookType.TXT  -> fetchFileText(book.filePath, "TXT")
         }
 
-        if (text.isBlank()) {
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    error = "Could not load content. The file may be image-based or corrupted.\n\nTry a text-based PDF or TXT file."
-                )
+        when (result) {
+            is ParseResult.Error -> {
+                _uiState.update { it.copy(isLoading = false, error = result.message) }
+                return
             }
-            return
-        }
+            is ParseResult.Success -> {
+                val text = result.text
+                val words = TextProcessor.splitIntoWords(text)
+                val sentences = TextProcessor.splitIntoSentences(text)
 
-        val words = TextProcessor.splitIntoWords(text)
-        val sentences = TextProcessor.splitIntoSentences(text)
+                if (words.isEmpty()) {
+                    _uiState.update { it.copy(isLoading = false, error = "No readable text found in this file.") }
+                    return
+                }
 
-        if (words.isEmpty()) {
-            _uiState.update {
-                it.copy(isLoading = false, error = "No readable text found in this file.")
+                val startWord = book.currentPosition.coerceIn(0, (words.size - 1).coerceAtLeast(0))
+                sessionStartTime = System.currentTimeMillis()
+
+                _uiState.update {
+                    it.copy(
+                        fullText = text,
+                        words = words,
+                        sentences = sentences,
+                        currentWordIndex = startWord,
+                        isLoading = false,
+                        error = null,
+                        sessionStartTime = sessionStartTime
+                    )
+                }
             }
-            return
-        }
-
-        val startWord = book.currentPosition.coerceIn(0, (words.size - 1).coerceAtLeast(0))
-
-        sessionStartTime = System.currentTimeMillis()
-
-        _uiState.update {
-            it.copy(
-                fullText = text,
-                words = words,
-                sentences = sentences,
-                currentWordIndex = startWord,
-                isLoading = false,
-                error = null,
-                sessionStartTime = sessionStartTime
-            )
         }
     }
 
-    private suspend fun fetchWebText(url: String): String {
-        if (url.isBlank()) return ""
-        return when (val result = webImporter.importFromUrl(url)) {
-            is WebImportResult.Success -> result.text
-            is WebImportResult.Error -> ""
-        }
-    }
-
-    private suspend fun fetchFileText(path: String, type: String): String {
-        if (path.isBlank()) return ""
+    private suspend fun fetchFileText(path: String, type: String): ParseResult {
+        if (path.isBlank()) return ParseResult.Error("No file path stored for this book")
         return try {
             val uri = Uri.parse(path)
             when (type) {
-                "PDF" -> when (val r = fileParser.parsePdf(uri)) {
-                    is ParseResult.Success -> r.text
-                    is ParseResult.Error -> ""
-                }
-                "EPUB" -> when (val r = fileParser.parseEpub(uri)) {
-                    is ParseResult.Success -> r.text
-                    is ParseResult.Error -> ""
-                }
-                else -> when (val r = fileParser.parseTxt(uri)) {
-                    is ParseResult.Success -> r.text
-                    is ParseResult.Error -> ""
-                }
+                "PDF"  -> fileParser.parsePdf(uri)
+                "EPUB" -> fileParser.parseEpub(uri)
+                else   -> fileParser.parseTxt(uri)
             }
+        } catch (e: SecurityException) {
+            ParseResult.Error(
+                "File access denied.\n\n" +
+                "The app no longer has permission to read this file.\n" +
+                "Please re-import the file from the Library."
+            )
         } catch (e: Exception) {
-            ""
+            ParseResult.Error("Could not read file: ${e.message ?: "Unknown error"}")
         }
     }
 
