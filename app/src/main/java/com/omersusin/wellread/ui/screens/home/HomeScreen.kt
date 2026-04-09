@@ -310,12 +310,14 @@ private fun BookCard(book: Book, onClick: () -> Unit) {
         BookType.DOCX -> SwipeColor
         BookType.DOCX -> SwipeColor
         BookType.DOCX -> SwipeColor
+        BookType.DOCX -> SwipeColor
     }
     val typeIcon: ImageVector = when (book.type) {
         BookType.PDF  -> Icons.Outlined.PictureAsPdf
         BookType.EPUB -> Icons.AutoMirrored.Outlined.MenuBook
         BookType.TXT  -> Icons.Outlined.Article
         BookType.WEB  -> Icons.Outlined.Language
+        BookType.DOCX -> Icons.Outlined.Description
         BookType.DOCX -> Icons.Outlined.Description
         BookType.DOCX -> Icons.Outlined.Description
         BookType.DOCX -> Icons.Outlined.Description

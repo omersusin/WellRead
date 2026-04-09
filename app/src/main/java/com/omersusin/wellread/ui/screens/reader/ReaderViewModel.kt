@@ -104,6 +104,7 @@ class ReaderViewModel @Inject constructor(
             BookType.TXT  -> fetchFileText(book.filePath, "TXT")
             BookType.DOCX -> fetchFileText(book.filePath, "DOCX")
             BookType.DOCX -> fetchFileText(book.filePath, "DOCX")
+            BookType.DOCX -> fetchFileText(book.filePath, "DOCX")
         }
 
         when (result) {
@@ -146,6 +147,9 @@ class ReaderViewModel @Inject constructor(
             when (type) {
                 "PDF"  -> fileParser.parsePdf(uri)
                 "EPUB" -> fileParser.parseEpub(uri)
+                "DOCX" -> fileParser.parseDocx(uri)
+                "HTML" -> fileParser.parseHtml(uri)
+                "MD"   -> fileParser.parseMarkdown(uri)
                 "DOCX" -> fileParser.parseDocx(uri)
                 "HTML" -> fileParser.parseHtml(uri)
                 "MD"   -> fileParser.parseMarkdown(uri)
