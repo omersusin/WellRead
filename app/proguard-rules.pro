@@ -1,0 +1,6 @@
+-keep class com.omersusin.wellread.data.local.entities.** { *; }
+-keep class com.omersusin.wellread.domain.model.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
+-dontwarn org.slf4j.**
+-dontwarn javax.**
