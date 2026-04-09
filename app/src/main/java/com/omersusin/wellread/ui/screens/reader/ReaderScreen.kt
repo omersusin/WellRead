@@ -6,6 +6,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.omersusin.wellread.domain.model.ReadingMode
@@ -38,87 +40,87 @@ fun ReaderScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        if (uiState.isLoading) {
-            LoadingState()
-        } else if (uiState.error != null) {
-            ErrorState(error = uiState.error!!, onBack = onNavigateBack)
-        } else {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Top bar
-                ReaderTopBar(
-                    title = uiState.book?.title ?: "",
-                    mode = uiState.currentMode,
-                    onBack = onNavigateBack,
-                    onModeClick = viewModel::toggleModeSelector,
-                    onSettingsClick = viewModel::toggleSettings
-                )
+        when {
+            uiState.isLoading -> LoadingState()
+            uiState.error != null -> ErrorState(
+                error = uiState.error!!,
+                onBack = onNavigateBack,
+                onRetry = viewModel::retryLoad
+            )
+            uiState.words.isEmpty() -> ErrorState(
+                error = "No content loaded",
+                onBack = onNavigateBack,
+                onRetry = viewModel::retryLoad
+            )
+            else -> {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    ReaderTopBar(
+                        title = uiState.book?.title ?: "",
+                        mode = uiState.currentMode,
+                        onBack = onNavigateBack,
+                        onModeClick = viewModel::toggleModeSelector,
+                        onSettingsClick = viewModel::toggleSettings
+                    )
 
-                // Progress indicator
-                val progress = if (uiState.words.isNotEmpty())
-                    uiState.currentWordIndex.toFloat() / uiState.words.size else 0f
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth().height(2.dp),
-                    color = uiState.currentMode.modeColor(),
-                    trackColor = uiState.currentMode.modeColor().copy(alpha = 0.15f)
-                )
+                    val progress = if (uiState.words.isNotEmpty())
+                        uiState.currentWordIndex.toFloat() / uiState.words.size else 0f
 
-                // Main reading area
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                ) {
-                    when (uiState.currentMode) {
-                        ReadingMode.BIONIC -> BionicModeContent(
-                            uiState = uiState,
-                            onSeek = viewModel::seekTo
-                        )
-                        ReadingMode.FLASH -> FlashModeContent(uiState = uiState)
-                        ReadingMode.FOCUS -> FocusModeContent(uiState = uiState)
-                        ReadingMode.TRAIN -> TrainModeContent(uiState = uiState)
-                        ReadingMode.SENTENCE_SWIPE -> SentenceSwipeModeContent(
-                            uiState = uiState,
-                            onSwipe = viewModel::onSentenceSwiped,
-                            onPrevious = viewModel::previousSentence
-                        )
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth().height(2.dp),
+                        color = uiState.currentMode.modeColor(),
+                        trackColor = uiState.currentMode.modeColor().copy(alpha = 0.15f)
+                    )
+
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        when (uiState.currentMode) {
+                            ReadingMode.BIONIC -> BionicModeContent(
+                                uiState = uiState,
+                                onSeek = viewModel::seekTo
+                            )
+                            ReadingMode.FLASH -> FlashModeContent(uiState = uiState)
+                            ReadingMode.FOCUS -> FocusModeContent(uiState = uiState)
+                            ReadingMode.TRAIN -> TrainModeContent(uiState = uiState)
+                            ReadingMode.SENTENCE_SWIPE -> SentenceSwipeModeContent(
+                                uiState = uiState,
+                                onSwipe = viewModel::onSentenceSwiped,
+                                onPrevious = viewModel::previousSentence
+                            )
+                        }
                     }
+
+                    ReaderBottomBar(
+                        uiState = uiState,
+                        onPlayPause = viewModel::togglePlay,
+                        onNext = viewModel::nextWord,
+                        onPrevious = viewModel::previousWord,
+                        onWpmChange = viewModel::setWpm
+                    )
                 }
 
-                // Bottom controls
-                ReaderBottomBar(
-                    uiState = uiState,
-                    onPlayPause = viewModel::togglePlay,
-                    onNext = viewModel::nextWord,
-                    onPrevious = viewModel::previousWord,
-                    onWpmChange = viewModel::setWpm
-                )
-            }
+                AnimatedVisibility(
+                    visible = uiState.showModeSelector,
+                    enter = fadeIn() + slideInVertically { it },
+                    exit = fadeOut() + slideOutVertically { it }
+                ) {
+                    ModeSelectorSheet(
+                        currentMode = uiState.currentMode,
+                        onModeSelected = viewModel::setMode,
+                        onDismiss = viewModel::toggleModeSelector
+                    )
+                }
 
-            // Mode selector overlay
-            AnimatedVisibility(
-                visible = uiState.showModeSelector,
-                enter = fadeIn() + slideInVertically { it },
-                exit = fadeOut() + slideOutVertically { it }
-            ) {
-                ModeSelectorSheet(
-                    currentMode = uiState.currentMode,
-                    onModeSelected = viewModel::setMode,
-                    onDismiss = viewModel::toggleModeSelector
-                )
-            }
-
-            // Settings overlay
-            AnimatedVisibility(
-                visible = uiState.showSettings,
-                enter = fadeIn() + slideInVertically { it },
-                exit = fadeOut() + slideOutVertically { it }
-            ) {
-                ReaderSettingsSheet(
-                    uiState = uiState,
-                    onFontSizeChange = viewModel::setFontSize,
-                    onDismiss = viewModel::toggleSettings
-                )
+                AnimatedVisibility(
+                    visible = uiState.showSettings,
+                    enter = fadeIn() + slideInVertically { it },
+                    exit = fadeOut() + slideOutVertically { it }
+                ) {
+                    ReaderSettingsSheet(
+                        uiState = uiState,
+                        onFontSizeChange = viewModel::setFontSize,
+                        onDismiss = viewModel::toggleSettings
+                    )
+                }
             }
         }
     }
@@ -145,11 +147,10 @@ private fun ReaderTopBar(
         },
         navigationIcon = {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, "Back")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
             }
         },
         actions = {
-            // Mode chip
             Surface(
                 onClick = onModeClick,
                 shape = RoundedCornerShape(12.dp),
@@ -169,8 +170,7 @@ private fun ReaderTopBar(
                         color = mode.modeColor()
                     )
                     Icon(
-                        Icons.Default.KeyboardArrowDown,
-                        null,
+                        Icons.Default.KeyboardArrowDown, null,
                         modifier = Modifier.size(16.dp),
                         tint = mode.modeColor()
                     )
@@ -192,9 +192,7 @@ private fun ReaderBottomBar(
     onPrevious: () -> Unit,
     onWpmChange: (Int) -> Unit
 ) {
-    val showControls = uiState.currentMode in listOf(
-        ReadingMode.FLASH, ReadingMode.FOCUS
-    )
+    val showControls = uiState.currentMode in listOf(ReadingMode.FLASH, ReadingMode.FOCUS)
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -207,21 +205,16 @@ private fun ReaderBottomBar(
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
             if (showControls) {
-                // WPM slider
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        "⚡",
-                        fontSize = 16.sp
-                    )
+                    Text("⚡", fontSize = 16.sp)
                     Slider(
                         value = uiState.wpm.toFloat(),
                         onValueChange = { onWpmChange(it.toInt()) },
                         valueRange = 50f..800f,
-                        steps = 14,
                         modifier = Modifier.weight(1f),
                         colors = SliderDefaults.colors(
                             thumbColor = uiState.currentMode.modeColor(),
@@ -249,7 +242,6 @@ private fun ReaderBottomBar(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Word count info
                 Text(
                     text = "${uiState.currentWordIndex} / ${uiState.words.size}",
                     style = MaterialTheme.typography.bodySmall,
@@ -309,9 +301,7 @@ private fun ModeSelectorSheet(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer
             )
         ) {
-            Column(
-                modifier = Modifier.padding(24.dp)
-            ) {
+            Column(modifier = Modifier.padding(24.dp)) {
                 Text(
                     "Switch Mode",
                     style = MaterialTheme.typography.titleLarge,
@@ -329,15 +319,12 @@ private fun ModeSelectorSheet(
                         colors = CardDefaults.cardColors(
                             containerColor = if (selected)
                                 mode.modeColor().copy(alpha = 0.2f)
-                            else
-                                MaterialTheme.colorScheme.surface
+                            else MaterialTheme.colorScheme.surface
                         ),
                         border = if (selected) BorderStroke(1.5.dp, mode.modeColor()) else null
                     ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
@@ -358,8 +345,7 @@ private fun ModeSelectorSheet(
                             }
                             if (selected) {
                                 Icon(
-                                    Icons.Default.CheckCircle,
-                                    null,
+                                    Icons.Default.CheckCircle, null,
                                     tint = mode.modeColor(),
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -428,22 +414,59 @@ private fun ReaderSettingsSheet(
 private fun LoadingState() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(color = WellReadPurple)
+            CircularProgressIndicator(color = WellReadPurple, strokeWidth = 3.dp)
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Loading content...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "Loading content...",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
     }
 }
 
 @Composable
-private fun ErrorState(error: String, onBack: () -> Unit) {
+private fun ErrorState(
+    error: String,
+    onBack: () -> Unit,
+    onRetry: () -> Unit
+) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("❌", fontSize = 48.sp)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Text("⚠️", fontSize = 56.sp)
             Spacer(modifier = Modifier.height(16.dp))
-            Text(error, color = MaterialTheme.colorScheme.error)
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onBack) { Text("Go Back") }
+            Text(
+                text = "Could not load content",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = error,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(
+                    onClick = onBack,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Go Back")
+                }
+                Button(
+                    onClick = onRetry,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = WellReadPurple)
+                ) {
+                    Text("Retry")
+                }
+            }
         }
     }
 }

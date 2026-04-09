@@ -1,10 +1,12 @@
 package com.omersusin.wellread.ui.screens.reader
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.omersusin.wellread.data.repository.BookRepository
 import com.omersusin.wellread.data.repository.SessionRepository
 import com.omersusin.wellread.domain.model.Book
+import com.omersusin.wellread.domain.model.BookType
 import com.omersusin.wellread.domain.model.ReadingMode
 import com.omersusin.wellread.domain.model.ReadingSession
 import com.omersusin.wellread.domain.model.UserPreferences
@@ -54,49 +56,68 @@ class ReaderViewModel @Inject constructor(
 
     private var playJob: Job? = null
     private var sessionStartTime = 0L
+    private var lastSavedIndex = 0
 
     fun initialize(bookId: Long, initialMode: String) {
         viewModelScope.launch {
-            dataStoreManager.userPreferences.first().let { prefs ->
-                _uiState.update {
-                    it.copy(
-                        preferences = prefs,
-                        wpm = prefs.defaultWpm,
-                        fontSize = prefs.fontSize,
-                        currentMode = try {
-                            ReadingMode.valueOf(initialMode)
-                        } catch (e: Exception) {
-                            prefs.defaultMode
-                        }
-                    )
-                }
+            val prefs = dataStoreManager.userPreferences.first()
+            _uiState.update {
+                it.copy(
+                    preferences = prefs,
+                    wpm = prefs.defaultWpm,
+                    fontSize = prefs.fontSize,
+                    currentMode = try {
+                        ReadingMode.valueOf(initialMode)
+                    } catch (e: Exception) {
+                        prefs.defaultMode
+                    }
+                )
             }
             loadBook(bookId)
         }
     }
 
     private suspend fun loadBook(bookId: Long) {
+        _uiState.update { it.copy(isLoading = true, error = null) }
+
         val book = bookRepository.getBookById(bookId)
         if (book == null) {
             _uiState.update { it.copy(isLoading = false, error = "Book not found") }
             return
         }
+
         _uiState.update { it.copy(book = book) }
 
-        val text = when {
-            book.sourceUrl.isNotBlank() -> fetchWebText(book.sourceUrl)
-            book.filePath.isNotBlank() -> fetchFileText(book.filePath, book.type.name)
-            else -> ""
+        val text = when (book.type) {
+            BookType.WEB -> fetchWebText(book.sourceUrl)
+            BookType.PDF -> fetchFileText(book.filePath, "PDF")
+            BookType.EPUB -> fetchFileText(book.filePath, "EPUB")
+            BookType.TXT -> fetchFileText(book.filePath, "TXT")
         }
 
         if (text.isBlank()) {
-            _uiState.update { it.copy(isLoading = false, error = "Could not load content") }
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    error = "Could not load content. The file may be image-based or corrupted.\n\nTry a text-based PDF or TXT file."
+                )
+            }
             return
         }
 
         val words = TextProcessor.splitIntoWords(text)
         val sentences = TextProcessor.splitIntoSentences(text)
-        val startWord = book.currentPosition.coerceIn(0, words.size - 1)
+
+        if (words.isEmpty()) {
+            _uiState.update {
+                it.copy(isLoading = false, error = "No readable text found in this file.")
+            }
+            return
+        }
+
+        val startWord = book.currentPosition.coerceIn(0, (words.size - 1).coerceAtLeast(0))
+
+        sessionStartTime = System.currentTimeMillis()
 
         _uiState.update {
             it.copy(
@@ -104,14 +125,15 @@ class ReaderViewModel @Inject constructor(
                 words = words,
                 sentences = sentences,
                 currentWordIndex = startWord,
-                isLoading = false
+                isLoading = false,
+                error = null,
+                sessionStartTime = sessionStartTime
             )
         }
-        sessionStartTime = System.currentTimeMillis()
-        _uiState.update { it.copy(sessionStartTime = sessionStartTime) }
     }
 
     private suspend fun fetchWebText(url: String): String {
+        if (url.isBlank()) return ""
         return when (val result = webImporter.importFromUrl(url)) {
             is WebImportResult.Success -> result.text
             is WebImportResult.Error -> ""
@@ -119,10 +141,25 @@ class ReaderViewModel @Inject constructor(
     }
 
     private suspend fun fetchFileText(path: String, type: String): String {
-        val uri = android.net.Uri.parse(path)
-        return when (val result = if (type == "PDF") fileParser.parsePdf(uri) else fileParser.parseTxt(uri)) {
-            is ParseResult.Success -> result.text
-            is ParseResult.Error -> ""
+        if (path.isBlank()) return ""
+        return try {
+            val uri = Uri.parse(path)
+            when (type) {
+                "PDF" -> when (val r = fileParser.parsePdf(uri)) {
+                    is ParseResult.Success -> r.text
+                    is ParseResult.Error -> ""
+                }
+                "EPUB" -> when (val r = fileParser.parseEpub(uri)) {
+                    is ParseResult.Success -> r.text
+                    is ParseResult.Error -> ""
+                }
+                else -> when (val r = fileParser.parseTxt(uri)) {
+                    is ParseResult.Success -> r.text
+                    is ParseResult.Error -> ""
+                }
+            }
+        } catch (e: Exception) {
+            ""
         }
     }
 
@@ -135,16 +172,15 @@ class ReaderViewModel @Inject constructor(
     private fun startAutoPlay() {
         playJob?.cancel()
         playJob = viewModelScope.launch {
-            val state = _uiState.value
-            when (state.currentMode) {
-                ReadingMode.FLASH -> autoPlayFlash()
-                ReadingMode.FOCUS -> autoPlayFocus()
+            when (_uiState.value.currentMode) {
+                ReadingMode.FLASH -> autoPlayWords()
+                ReadingMode.FOCUS -> autoPlayWords()
                 else -> {}
             }
         }
     }
 
-    private suspend fun autoPlayFlash() {
+    private suspend fun autoPlayWords() {
         while (_uiState.value.isPlaying) {
             val state = _uiState.value
             if (state.currentWordIndex >= state.words.size - 1) {
@@ -152,22 +188,7 @@ class ReaderViewModel @Inject constructor(
                 saveSession()
                 break
             }
-            val delayMs = (60000L / state.wpm)
-            delay(delayMs)
-            _uiState.update { it.copy(currentWordIndex = it.currentWordIndex + 1) }
-            saveProgressPeriodically()
-        }
-    }
-
-    private suspend fun autoPlayFocus() {
-        while (_uiState.value.isPlaying) {
-            val state = _uiState.value
-            if (state.currentWordIndex >= state.words.size - 1) {
-                _uiState.update { it.copy(isPlaying = false) }
-                saveSession()
-                break
-            }
-            val delayMs = (60000L / state.wpm)
+            val delayMs = (60000L / state.wpm).coerceAtLeast(50L)
             delay(delayMs)
             _uiState.update { it.copy(currentWordIndex = it.currentWordIndex + 1) }
             saveProgressPeriodically()
@@ -235,13 +256,21 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun seekTo(index: Int) {
-        _uiState.update { it.copy(currentWordIndex = index.coerceIn(0, it.words.size - 1)) }
+        _uiState.update {
+            it.copy(currentWordIndex = index.coerceIn(0, (it.words.size - 1).coerceAtLeast(0)))
+        }
     }
 
-    private var lastSavedIndex = 0
+    fun retryLoad() {
+        val book = _uiState.value.book
+        if (book != null) {
+            viewModelScope.launch { loadBook(book.id) }
+        }
+    }
+
     private fun saveProgressPeriodically() {
         val state = _uiState.value
-        if (state.currentWordIndex - lastSavedIndex > 50) {
+        if (state.currentWordIndex - lastSavedIndex > 100) {
             lastSavedIndex = state.currentWordIndex
             viewModelScope.launch {
                 state.book?.let {
@@ -258,7 +287,9 @@ class ReaderViewModel @Inject constructor(
         val durationMs = endTime - sessionStartTime
         if (durationMs < 5000) return
         val wordsRead = state.currentWordIndex
-        val wpm = if (durationMs > 0) (wordsRead / (durationMs / 60000.0)).toInt() else 0
+        val minutes = durationMs / 60000.0
+        val wpm = if (minutes > 0) (wordsRead / minutes).toInt() else 0
+
         viewModelScope.launch {
             sessionRepository.insertSession(
                 ReadingSession(
