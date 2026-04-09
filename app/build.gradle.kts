@@ -21,8 +21,7 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -36,6 +35,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -52,11 +52,15 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/NOTICE.md"
             excludes += "/META-INF/LICENSE.md"
+            excludes += "/META-INF/NOTICE"
+            excludes += "/META-INF/LICENSE"
         }
     }
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -70,8 +74,8 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation("com.google.android.material:material:1.12.0")
     implementation(libs.androidx.material.icons)
+    implementation("com.google.android.material:material:1.12.0")
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
@@ -87,11 +91,7 @@ dependencies {
     implementation(libs.okhttp.logging)
     implementation(libs.jsoup)
 
-    implementation(libs.itext.kernel)
-    implementation(libs.itext.layout)
-
     implementation(libs.coil.compose)
-    implementation(libs.accompanist.systemuicontroller)
     implementation(libs.vico.compose)
     implementation(libs.vico.compose.m3)
     implementation(libs.kotlinx.coroutines)

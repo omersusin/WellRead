@@ -14,13 +14,12 @@ datastore = "1.1.1"
 retrofit = "2.11.0"
 okhttp = "4.12.0"
 jsoup = "1.17.2"
-itext = "7.2.5"
-epublib = "1.2.0"
 coil = "2.6.0"
 accompanist = "0.34.0"
 vico = "1.15.0"
 splashscreen = "1.0.1"
 coroutines = "1.8.1"
+desugar = "2.0.4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -52,10 +51,6 @@ okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhtt
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
 
-itext-kernel = { group = "com.itextpdf", name = "kernel", version.ref = "itext" }
-itext-layout = { group = "com.itextpdf", name = "layout", version.ref = "itext" }
-epublib = { group = "nl.siegmann.epublib", name = "epublib-core", version.ref = "epublib" }
-
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 accompanist-systemuicontroller = { group = "com.google.accompanist", name = "accompanist-systemuicontroller", version.ref = "accompanist" }
 
@@ -63,6 +58,7 @@ vico-compose = { group = "com.patrykandpatrick.vico", name = "compose", version.
 vico-compose-m3 = { group = "com.patrykandpatrick.vico", name = "compose-m3", version.ref = "vico" }
 
 kotlinx-coroutines = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugar" }
 
 junit = { group = "junit", name = "junit", version = "4.13.2" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version = "1.1.5" }
