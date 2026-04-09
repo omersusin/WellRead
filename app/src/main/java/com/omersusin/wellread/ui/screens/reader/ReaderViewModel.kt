@@ -28,11 +28,14 @@ data class ReaderUiState(
     val fullText: String = "",
     val words: List<String> = emptyList(),
     val sentences: List<String> = emptyList(),
+    val paragraphs: List<String> = emptyList(),
     val currentMode: ReadingMode = ReadingMode.BIONIC,
     val isPlaying: Boolean = false,
     val currentWordIndex: Int = 0,
     val currentSentenceIndex: Int = 0,
+    val currentParagraphIndex: Int = 0,
     val wpm: Int = 300,
+    val chunkSize: Int = 3,
     val isLoading: Boolean = true,
     val error: String? = null,
     val preferences: UserPreferences = UserPreferences(),
@@ -66,11 +69,7 @@ class ReaderViewModel @Inject constructor(
                     preferences = prefs,
                     wpm = prefs.defaultWpm,
                     fontSize = prefs.fontSize,
-                    currentMode = try {
-                        ReadingMode.valueOf(initialMode)
-                    } catch (e: Exception) {
-                        prefs.defaultMode
-                    }
+                    currentMode = try { ReadingMode.valueOf(initialMode) } catch (_: Exception) { prefs.defaultMode }
                 )
             }
             loadBook(bookId)
@@ -85,38 +84,50 @@ class ReaderViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = false, error = "Book not found") }
             return
         }
-
         _uiState.update { it.copy(book = book) }
 
-        val result = when (book.type) {
+        val result: ParseResult = when (book.type) {
             BookType.WEB -> {
-                if (book.sourceUrl.isBlank()) {
-                    ParseResult.Error("No web URL saved for this book")
-                } else {
+                // Use cached content if available; only re-fetch if missing
+                if (book.content.isNotBlank()) {
+                    ParseResult.Success(book.content, TextProcessor.countWords(book.content))
+                } else if (book.sourceUrl.isNotBlank()) {
                     when (val r = webImporter.importFromUrl(book.sourceUrl)) {
-                        is WebImportResult.Success -> ParseResult.Success(r.text, TextProcessor.countWords(r.text))
-                        is WebImportResult.Error   -> ParseResult.Error(r.message)
+                        is WebImportResult.Success -> {
+                            // Back-fill cache so next open is instant
+                            bookRepository.updateBook(book.copy(content = r.text))
+                            ParseResult.Success(r.text, TextProcessor.countWords(r.text))
+                        }
+                        is WebImportResult.Error -> ParseResult.Error(r.message)
                     }
+                } else {
+                    ParseResult.Error("No content or URL stored for this book")
                 }
             }
-            BookType.PDF  -> fetchFileText(book.filePath, "PDF")
-            BookType.EPUB -> fetchFileText(book.filePath, "EPUB")
-            BookType.TXT  -> fetchFileText(book.filePath, "TXT")
-            BookType.DOCX -> fetchFileText(book.filePath, "DOCX")
-            BookType.DOCX -> fetchFileText(book.filePath, "DOCX")
-            BookType.DOCX -> fetchFileText(book.filePath, "DOCX")
-            BookType.DOCX -> fetchFileText(book.filePath, "DOCX")
+            BookType.CLIPBOARD -> {
+                if (book.content.isNotBlank())
+                    ParseResult.Success(book.content, TextProcessor.countWords(book.content))
+                else
+                    ParseResult.Error("Clipboard content is empty")
+            }
+            BookType.PDF      -> fetchFileText(book.filePath, "PDF")
+            BookType.EPUB     -> fetchFileText(book.filePath, "EPUB")
+            BookType.TXT      -> fetchFileText(book.filePath, "TXT")
+            BookType.DOCX     -> fetchFileText(book.filePath, "DOCX")
+            BookType.HTML     -> fetchFileText(book.filePath, "HTML")
+            BookType.MARKDOWN -> fetchFileText(book.filePath, "MD")
         }
 
         when (result) {
             is ParseResult.Error -> {
                 _uiState.update { it.copy(isLoading = false, error = result.message) }
-                return
             }
             is ParseResult.Success -> {
-                val text = result.text
-                val words = TextProcessor.splitIntoWords(text)
+                val text      = result.text
+                val words     = TextProcessor.splitIntoWords(text)
                 val sentences = TextProcessor.splitIntoSentences(text)
+                val paragraphs = text.split(Regex("\\n{2,}"))
+                    .map { it.trim() }.filter { it.length > 10 }
 
                 if (words.isEmpty()) {
                     _uiState.update { it.copy(isLoading = false, error = "No readable text found in this file.") }
@@ -131,6 +142,7 @@ class ReaderViewModel @Inject constructor(
                         fullText = text,
                         words = words,
                         sentences = sentences,
+                        paragraphs = paragraphs,
                         currentWordIndex = startWord,
                         isLoading = false,
                         error = null,
@@ -151,15 +163,7 @@ class ReaderViewModel @Inject constructor(
                 "DOCX" -> fileParser.parseDocx(uri)
                 "HTML" -> fileParser.parseHtml(uri)
                 "MD"   -> fileParser.parseMarkdown(uri)
-                "DOCX" -> fileParser.parseDocx(uri)
-                "HTML" -> fileParser.parseHtml(uri)
-                "MD"   -> fileParser.parseMarkdown(uri)
-                "DOCX" -> fileParser.parseDocx(uri)
-                "HTML" -> fileParser.parseHtml(uri)
-                "MD"   -> fileParser.parseMarkdown(uri)
-                "DOCX" -> fileParser.parseDocx(uri)
-                "HTML" -> fileParser.parseHtml(uri)
-                "MD"   -> fileParser.parseMarkdown(uri)
+                "RTF"  -> fileParser.parseRtf(uri)
                 else   -> fileParser.parseTxt(uri)
             }
         } catch (e: SecurityException) {
@@ -183,8 +187,8 @@ class ReaderViewModel @Inject constructor(
         playJob?.cancel()
         playJob = viewModelScope.launch {
             when (_uiState.value.currentMode) {
-                ReadingMode.FLASH -> autoPlayWords()
-                ReadingMode.FOCUS -> autoPlayWords()
+                ReadingMode.FLASH, ReadingMode.FOCUS -> autoPlayWords()
+                ReadingMode.CHUNK                    -> autoPlayChunks()
                 else -> {}
             }
         }
@@ -195,8 +199,7 @@ class ReaderViewModel @Inject constructor(
             val state = _uiState.value
             if (state.currentWordIndex >= state.words.size - 1) {
                 _uiState.update { it.copy(isPlaying = false) }
-                saveSession()
-                break
+                saveSession(); break
             }
             val delayMs = (60000L / state.wpm).coerceAtLeast(50L)
             delay(delayMs)
@@ -205,10 +208,23 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    private fun stopAutoPlay() {
-        playJob?.cancel()
-        playJob = null
+    private suspend fun autoPlayChunks() {
+        while (_uiState.value.isPlaying) {
+            val state = _uiState.value
+            val nextIndex = state.currentWordIndex + state.chunkSize
+            if (nextIndex >= state.words.size) {
+                _uiState.update { it.copy(isPlaying = false) }
+                saveSession(); break
+            }
+            // Display time scales with chunk size and WPM
+            val msPerWord = (60000L / state.wpm).coerceAtLeast(50L)
+            delay(msPerWord * state.chunkSize)
+            _uiState.update { it.copy(currentWordIndex = nextIndex) }
+            saveProgressPeriodically()
+        }
     }
+
+    private fun stopAutoPlay() { playJob?.cancel(); playJob = null }
 
     fun nextWord() {
         _uiState.update { state ->
@@ -220,9 +236,7 @@ class ReaderViewModel @Inject constructor(
 
     fun previousWord() {
         _uiState.update { state ->
-            if (state.currentWordIndex > 0)
-                state.copy(currentWordIndex = state.currentWordIndex - 1)
-            else state
+            if (state.currentWordIndex > 0) state.copy(currentWordIndex = state.currentWordIndex - 1) else state
         }
     }
 
@@ -236,57 +250,54 @@ class ReaderViewModel @Inject constructor(
 
     fun previousSentence() {
         _uiState.update { state ->
-            if (state.currentSentenceIndex > 0)
-                state.copy(currentSentenceIndex = state.currentSentenceIndex - 1)
+            if (state.currentSentenceIndex > 0) state.copy(currentSentenceIndex = state.currentSentenceIndex - 1) else state
+        }
+    }
+
+    fun nextParagraph() {
+        _uiState.update { state ->
+            if (state.currentParagraphIndex < state.paragraphs.size - 1)
+                state.copy(currentParagraphIndex = state.currentParagraphIndex + 1)
             else state
+        }
+    }
+
+    fun previousParagraph() {
+        _uiState.update { state ->
+            if (state.currentParagraphIndex > 0) state.copy(currentParagraphIndex = state.currentParagraphIndex - 1) else state
         }
     }
 
     fun onSentenceSwiped() = nextSentence()
 
-    fun setWpm(wpm: Int) {
-        _uiState.update { it.copy(wpm = wpm.coerceIn(50, 1000)) }
-    }
+    fun setWpm(wpm: Int) { _uiState.update { it.copy(wpm = wpm.coerceIn(50, 1500)) } }
+
+    fun setChunkSize(size: Int) { _uiState.update { it.copy(chunkSize = size.coerceIn(1, 10)) } }
 
     fun setMode(mode: ReadingMode) {
         stopAutoPlay()
         _uiState.update { it.copy(currentMode = mode, isPlaying = false, showModeSelector = false) }
     }
 
-    fun setFontSize(size: Float) {
-        _uiState.update { it.copy(fontSize = size.coerceIn(12f, 32f)) }
-    }
+    fun setFontSize(size: Float) { _uiState.update { it.copy(fontSize = size.coerceIn(12f, 36f)) } }
 
-    fun toggleModeSelector() {
-        _uiState.update { it.copy(showModeSelector = !it.showModeSelector) }
-    }
-
-    fun toggleSettings() {
-        _uiState.update { it.copy(showSettings = !it.showSettings) }
-    }
+    fun toggleModeSelector() { _uiState.update { it.copy(showModeSelector = !it.showModeSelector) } }
+    fun toggleSettings()     { _uiState.update { it.copy(showSettings = !it.showSettings) } }
 
     fun seekTo(index: Int) {
-        _uiState.update {
-            it.copy(currentWordIndex = index.coerceIn(0, (it.words.size - 1).coerceAtLeast(0)))
-        }
+        _uiState.update { it.copy(currentWordIndex = index.coerceIn(0, (it.words.size - 1).coerceAtLeast(0))) }
     }
 
     fun retryLoad() {
         val book = _uiState.value.book
-        if (book != null) {
-            viewModelScope.launch { loadBook(book.id) }
-        }
+        if (book != null) viewModelScope.launch { loadBook(book.id) }
     }
 
     private fun saveProgressPeriodically() {
         val state = _uiState.value
         if (state.currentWordIndex - lastSavedIndex > 100) {
             lastSavedIndex = state.currentWordIndex
-            viewModelScope.launch {
-                state.book?.let {
-                    bookRepository.updateProgress(it.id, state.currentWordIndex)
-                }
-            }
+            viewModelScope.launch { state.book?.let { bookRepository.updateProgress(it.id, state.currentWordIndex) } }
         }
     }
 
@@ -299,16 +310,12 @@ class ReaderViewModel @Inject constructor(
         val wordsRead = state.currentWordIndex
         val minutes = durationMs / 60000.0
         val wpm = if (minutes > 0) (wordsRead / minutes).toInt() else 0
-
         viewModelScope.launch {
             sessionRepository.insertSession(
                 ReadingSession(
-                    bookId = book.id,
-                    mode = state.currentMode,
-                    startTime = sessionStartTime,
-                    endTime = endTime,
-                    wordsRead = wordsRead,
-                    wpm = wpm
+                    bookId = book.id, mode = state.currentMode,
+                    startTime = sessionStartTime, endTime = endTime,
+                    wordsRead = wordsRead, wpm = wpm
                 )
             )
             bookRepository.updateProgress(book.id, state.currentWordIndex)

@@ -19,15 +19,10 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): WellReadDatabase =
-        Room.databaseBuilder(
-            context,
-            WellReadDatabase::class.java,
-            "wellread.db"
-        ).build()
+        Room.databaseBuilder(context, WellReadDatabase::class.java, "wellread.db")
+            .addMigrations(WellReadDatabase.MIGRATION_1_2)
+            .build()
 
-    @Provides
-    fun provideBookDao(db: WellReadDatabase): BookDao = db.bookDao()
-
-    @Provides
-    fun provideSessionDao(db: WellReadDatabase): SessionDao = db.sessionDao()
+    @Provides fun provideBookDao(db: WellReadDatabase): BookDao = db.bookDao()
+    @Provides fun provideSessionDao(db: WellReadDatabase): SessionDao = db.sessionDao()
 }

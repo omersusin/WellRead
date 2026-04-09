@@ -19,7 +19,8 @@ data class BookEntity(
     val currentPosition: Int = 0,
     val isFinished: Boolean = false,
     val addedAt: Long = System.currentTimeMillis(),
-    val lastReadAt: Long = 0L
+    val lastReadAt: Long = 0L,
+    val content: String = ""
 ) {
     fun toDomain() = Book(
         id = id,
@@ -28,12 +29,13 @@ data class BookEntity(
         filePath = filePath,
         sourceUrl = sourceUrl,
         coverPath = coverPath,
-        type = BookType.valueOf(type),
+        type = try { BookType.valueOf(type) } catch (_: Exception) { BookType.TXT },
         totalWords = totalWords,
         currentPosition = currentPosition,
         isFinished = isFinished,
         addedAt = addedAt,
-        lastReadAt = lastReadAt
+        lastReadAt = lastReadAt,
+        content = content
     )
 }
 
@@ -49,5 +51,6 @@ fun Book.toEntity() = BookEntity(
     currentPosition = currentPosition,
     isFinished = isFinished,
     addedAt = addedAt,
-    lastReadAt = lastReadAt
+    lastReadAt = lastReadAt,
+    content = content
 )

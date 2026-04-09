@@ -1,5 +1,7 @@
 package com.omersusin.wellread.ui.screens.library
 
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -86,24 +88,19 @@ fun LibraryScreen(
             ExtendedFloatingActionButton(
                 onClick = { viewModel.showAddDialog() },
                 icon   = { Icon(Icons.Default.Add, null) },
-                text   = { Text("Add Book", fontWeight = FontWeight.SemiBold) },
+                text   = { Text("Add Content", fontWeight = FontWeight.SemiBold) },
                 shape  = RoundedCornerShape(20.dp)
             )
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+
             OutlinedTextField(
                 value = uiState.searchQuery,
                 onValueChange = viewModel::onSearchQuery,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                placeholder = { Text("Search books…") },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                placeholder = { Text("Search books...") },
                 leadingIcon  = { Icon(Icons.Default.Search, null) },
                 trailingIcon = {
                     if (uiState.searchQuery.isNotEmpty()) {
@@ -112,7 +109,7 @@ fun LibraryScreen(
                         }
                     }
                 },
-                shape     = RoundedCornerShape(20.dp),
+                shape      = RoundedCornerShape(20.dp),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor   = MaterialTheme.colorScheme.primary,
@@ -136,17 +133,12 @@ fun LibraryScreen(
 
             AnimatedVisibility(visible = uiState.isImporting) {
                 LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
 
             if (uiState.filteredBooks.isEmpty()) {
-                EmptyState(
-                    modifier  = Modifier.weight(1f),
-                    onAddBook = { viewModel.showAddDialog() }
-                )
+                EmptyState(modifier = Modifier.weight(1f), onAddBook = { viewModel.showAddDialog() })
             } else {
                 LazyVerticalGrid(
                     columns               = GridCells.Fixed(2),
@@ -157,8 +149,8 @@ fun LibraryScreen(
                 ) {
                     items(uiState.filteredBooks, key = { it.id }) { book ->
                         LibraryBookCard(
-                            book         = book,
-                            onBookClick  = { onNavigateToReader(book.id, ReadingMode.BIONIC.name) },
+                            book          = book,
+                            onBookClick   = { onNavigateToReader(book.id, ReadingMode.BIONIC.name) },
                             onDeleteClick = { viewModel.deleteBook(book) }
                         )
                     }
@@ -167,32 +159,41 @@ fun LibraryScreen(
         }
     }
 
+    // ── Dialogs ───────────────────────────────────────────────────────────────
+
     if (uiState.showAddDialog) {
         AddBookDialog(
-            onDismiss  = viewModel::hideAddDialog,
-            onAddFile  = {
+            onDismiss       = viewModel::hideAddDialog,
+            onAddFile       = {
                 viewModel.hideAddDialog()
                 fileLauncher.launch(
                     arrayOf(
                         "application/pdf",
                         "application/epub+zip",
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        "application/msword",
-                        "text/plain",
-                        "text/html",
-                        "text/markdown",
-                        "*/*"
+                        "application/msword", "application/rtf", "text/rtf",
+                        "text/plain", "text/html", "text/markdown", "*/*"
                     )
                 )
             },
-            onAddUrl = viewModel::showUrlDialog
+            onAddUrl       = viewModel::showUrlDialog,
+            onAddClipboard = viewModel::showClipboardDialog
         )
     }
 
     if (uiState.showUrlDialog) {
-        UrlImportDialog(
-            onDismiss = viewModel::hideUrlDialog,
-            onImport  = viewModel::importFromUrl
+        UrlImportDialog(onDismiss = viewModel::hideUrlDialog, onImport = viewModel::importFromUrl)
+    }
+
+    if (uiState.showClipboardDialog) {
+        val clipManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clipText = remember {
+            clipManager.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+        }
+        ClipboardImportDialog(
+            clipboardPreview = clipText,
+            onDismiss = viewModel::hideClipboardDialog,
+            onImport  = { title -> viewModel.importFromClipboard(clipText, title) }
         )
     }
 
@@ -210,113 +211,87 @@ fun LibraryScreen(
     }
 }
 
+// ── Book card ─────────────────────────────────────────────────────────────────
+
 @Composable
-private fun LibraryBookCard(
-    book: Book,
-    onBookClick: () -> Unit,
-    onDeleteClick: () -> Unit
-) {
+private fun LibraryBookCard(book: Book, onBookClick: () -> Unit, onDeleteClick: () -> Unit) {
     var showMenu by remember { mutableStateOf(false) }
-    val progress = if (book.totalWords > 0)
-        book.currentPosition.toFloat() / book.totalWords else 0f
+    val progress = if (book.totalWords > 0) book.currentPosition.toFloat() / book.totalWords else 0f
     val typeColor = book.typeColor()
 
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onBookClick),
-        shape    = RoundedCornerShape(24.dp),
-        colors   = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
+        modifier  = Modifier.fillMaxWidth().clickable(onClick = onBookClick),
+        shape     = RoundedCornerShape(20.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
-                modifier              = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = typeColor.copy(alpha = 0.18f)
+                    shape = RoundedCornerShape(8.dp),
+                    color = typeColor.copy(alpha = 0.15f)
                 ) {
                     Text(
                         text = book.typeLabel(),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        style    = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color    = typeColor
+                        color = typeColor
                     )
                 }
                 Box {
-                    FilledTonalIconButton(
-                        onClick   = { showMenu = true },
-                        modifier  = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.MoreVert, null,
-                            modifier = Modifier.size(14.dp)
-                        )
+                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(16.dp))
                     }
-                    DropdownMenu(
-                        expanded        = showMenu,
-                        onDismissRequest = { showMenu = false }
-                    ) {
+                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                         DropdownMenuItem(
                             text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                             onClick = { showMenu = false; onDeleteClick() },
                             leadingIcon = {
-                                Icon(
-                                    Icons.Default.Delete, null,
-                                    tint = MaterialTheme.colorScheme.error
-                                )
+                                Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
                             }
                         )
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(Modifier.height(10.dp))
             Surface(
-                shape    = RoundedCornerShape(14.dp),
-                color    = typeColor.copy(alpha = 0.15f),
-                modifier = Modifier.size(48.dp)
+                shape = RoundedCornerShape(12.dp),
+                color = typeColor.copy(alpha = 0.12f),
+                modifier = Modifier.size(46.dp)
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(
-                        imageVector = book.typeIcon(),
-                        contentDescription = null,
-                        modifier = Modifier.size(26.dp),
-                        tint     = typeColor
-                    )
+                    Icon(book.typeIcon(), null, modifier = Modifier.size(24.dp), tint = typeColor)
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp))
             Text(
                 text = book.title,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                maxLines   = 2,
-                overflow   = TextOverflow.Ellipsis
+                maxLines = 2, overflow = TextOverflow.Ellipsis
             )
             if (book.author != "Unknown") {
                 Text(
-                    text  = book.author,
+                    text = book.author,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(Modifier.height(10.dp))
             LinearProgressIndicator(
                 progress   = { progress },
-                modifier   = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
+                modifier   = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
                 color      = typeColor,
-                trackColor = typeColor.copy(alpha = 0.2f)
+                trackColor = typeColor.copy(alpha = 0.15f)
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
+            Spacer(Modifier.height(4.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
                     "${(progress * 100).roundToInt()}%",
                     style = MaterialTheme.typography.labelSmall,
@@ -332,11 +307,14 @@ private fun LibraryBookCard(
     }
 }
 
+// ── Dialogs ───────────────────────────────────────────────────────────────────
+
 @Composable
 private fun AddBookDialog(
     onDismiss: () -> Unit,
     onAddFile: () -> Unit,
-    onAddUrl:  () -> Unit
+    onAddUrl: () -> Unit,
+    onAddClipboard: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -346,16 +324,23 @@ private fun AddBookDialog(
                 AddOptionButton(
                     icon     = Icons.Outlined.UploadFile,
                     title    = "From File",
-                    subtitle = "PDF, EPUB, DOCX, TXT, HTML, Markdown",
+                    subtitle = "PDF, EPUB, DOCX, TXT, HTML, Markdown, RTF",
                     color    = BionicColor,
                     onClick  = onAddFile
                 )
                 AddOptionButton(
                     icon     = Icons.Outlined.Language,
                     title    = "From Web URL",
-                    subtitle = "Paste any article URL",
+                    subtitle = "Paste any article or Wikipedia URL",
                     color    = FlashColor,
                     onClick  = onAddUrl
+                )
+                AddOptionButton(
+                    icon     = Icons.Outlined.ContentPaste,
+                    title    = "From Clipboard",
+                    subtitle = "Paste long text copied from anywhere",
+                    color    = ChunkColor,
+                    onClick  = onAddClipboard
                 )
             }
         },
@@ -368,37 +353,27 @@ private fun AddBookDialog(
 
 @Composable
 private fun AddOptionButton(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    color: Color,
-    onClick: () -> Unit
+    icon: ImageVector, title: String, subtitle: String, color: Color, onClick: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape    = RoundedCornerShape(20.dp),
+        shape    = RoundedCornerShape(16.dp),
         colors   = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.08f)),
-        border   = BorderStroke(1.dp, color.copy(alpha = 0.3f))
+        border   = BorderStroke(1.dp, color.copy(alpha = 0.25f))
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Surface(
-                shape    = RoundedCornerShape(14.dp),
-                color    = color.copy(alpha = 0.15f),
-                modifier = Modifier.size(44.dp)
-            ) {
+            Surface(shape = RoundedCornerShape(12.dp), color = color.copy(alpha = 0.15f), modifier = Modifier.size(40.dp)) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(icon, null, modifier = Modifier.size(22.dp), tint = color)
+                    Icon(icon, null, modifier = Modifier.size(20.dp), tint = color)
                 }
             }
             Column {
-                Text(title, style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold, color = color)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = color)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -412,31 +387,82 @@ private fun UrlImportDialog(onDismiss: () -> Unit, onImport: (String) -> Unit) {
         title   = { Text("Import from URL", fontWeight = FontWeight.ExtraBold) },
         text    = {
             OutlinedTextField(
-                value = url,
-                onValueChange = { url = it },
+                value = url, onValueChange = { url = it },
                 label = { Text("Article URL") },
-                placeholder = { Text("https://…") },
+                placeholder = { Text("https://...") },
                 leadingIcon = { Icon(Icons.Outlined.Language, null) },
                 modifier   = Modifier.fillMaxWidth(),
-                shape      = RoundedCornerShape(18.dp),
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done
-                ),
-                keyboardActions = KeyboardActions(
-                    onDone = { if (url.isNotBlank()) onImport(url) }
-                ),
+                shape      = RoundedCornerShape(16.dp),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (url.isNotBlank()) onImport(url.trim()) }),
                 singleLine = true
             )
         },
         confirmButton = {
-            Button(
-                onClick  = { if (url.isNotBlank()) onImport(url) },
-                enabled  = url.isNotBlank(),
-                shape    = RoundedCornerShape(14.dp)
-            ) { Text("Import", fontWeight = FontWeight.SemiBold) }
+            Button(onClick = { if (url.isNotBlank()) onImport(url.trim()) }, enabled = url.isNotBlank(), shape = RoundedCornerShape(12.dp)) {
+                Text("Import", fontWeight = FontWeight.SemiBold)
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        shape         = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    )
+}
+
+@Composable
+private fun ClipboardImportDialog(
+    clipboardPreview: String,
+    onDismiss: () -> Unit,
+    onImport: (String) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Import from Clipboard", fontWeight = FontWeight.ExtraBold) },
+        text  = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (clipboardPreview.isBlank()) {
+                    Text("Clipboard is empty. Copy some text first, then try again.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error)
+                } else {
+                    Surface(
+                        shape  = RoundedCornerShape(12.dp),
+                        color  = MaterialTheme.colorScheme.surfaceContainerLowest,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = clipboardPreview.take(200).let { if (clipboardPreview.length > 200) "$it..." else it },
+                            modifier = Modifier.padding(10.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        "${clipboardPreview.length} characters",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = title, onValueChange = { title = it },
+                        label = { Text("Title (optional)") },
+                        placeholder = { Text("Clipboard Import") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        singleLine = true
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (clipboardPreview.isNotBlank()) {
+                Button(onClick = { onImport(title) }, shape = RoundedCornerShape(12.dp)) {
+                    Text("Add to Library", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        shape = RoundedCornerShape(28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     )
 }
@@ -449,65 +475,58 @@ private fun EmptyState(modifier: Modifier = Modifier, onAddBook: () -> Unit) {
         verticalArrangement = Arrangement.Center
     ) {
         Surface(
-            shape    = CircleShape,
-            color    = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.size(88.dp)
+            shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(84.dp)
         ) {
             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                Icon(
-                    Icons.Outlined.LibraryBooks, null,
-                    modifier = Modifier.size(44.dp),
-                    tint     = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                Icon(Icons.Outlined.LibraryBooks, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
             }
         }
-        Spacer(modifier = Modifier.height(20.dp))
-        Text(
-            "Your library is empty",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.ExtraBold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            "Add a book to get started",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Button(
-            onClick = onAddBook,
-            shape   = RoundedCornerShape(18.dp)
-        ) {
+        Spacer(Modifier.height(20.dp))
+        Text("Library is empty", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+        Spacer(Modifier.height(8.dp))
+        Text("Add a book to get started", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(24.dp))
+        Button(onClick = onAddBook, shape = RoundedCornerShape(16.dp)) {
             Icon(Icons.Default.Add, null)
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
             Text("Add Content", fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
 // ── Book helpers ──────────────────────────────────────────────────────────────
+
 fun Book.typeColor(): Color = when (type) {
-    BookType.PDF  -> BionicColor
-    BookType.EPUB -> FocusColor
-    BookType.TXT  -> TrainColor
-    BookType.WEB  -> FlashColor
-    BookType.DOCX -> SwipeColor
+    BookType.PDF       -> BionicColor
+    BookType.EPUB      -> FocusColor
+    BookType.TXT       -> TrainColor
+    BookType.WEB       -> FlashColor
+    BookType.DOCX      -> SwipeColor
+    BookType.MARKDOWN  -> ChunkColor
+    BookType.HTML      -> ParagraphColor
+    BookType.CLIPBOARD -> AccentTeal
 }
 
 fun Book.typeIcon(): ImageVector = when (type) {
-    BookType.PDF  -> Icons.Outlined.PictureAsPdf
-    BookType.EPUB -> Icons.AutoMirrored.Outlined.MenuBook
-    BookType.TXT  -> Icons.Outlined.Article
-    BookType.WEB  -> Icons.Outlined.Language
-    BookType.DOCX -> Icons.Outlined.Description
+    BookType.PDF       -> Icons.Outlined.PictureAsPdf
+    BookType.EPUB      -> Icons.AutoMirrored.Outlined.MenuBook
+    BookType.TXT       -> Icons.Outlined.Article
+    BookType.WEB       -> Icons.Outlined.Language
+    BookType.DOCX      -> Icons.Outlined.Description
+    BookType.MARKDOWN  -> Icons.Outlined.Code
+    BookType.HTML      -> Icons.Outlined.Html
+    BookType.CLIPBOARD -> Icons.Outlined.ContentPaste
 }
 
 fun Book.typeLabel(): String = when (type) {
-    BookType.PDF  -> "PDF"
-    BookType.EPUB -> "EPUB"
-    BookType.TXT  -> "TXT"
-    BookType.WEB  -> "WEB"
-    BookType.DOCX -> "DOCX"
+    BookType.PDF       -> "PDF"
+    BookType.EPUB      -> "EPUB"
+    BookType.TXT       -> "TXT"
+    BookType.WEB       -> "WEB"
+    BookType.DOCX      -> "DOCX"
+    BookType.MARKDOWN  -> "MD"
+    BookType.HTML      -> "HTML"
+    BookType.CLIPBOARD -> "CLIP"
 }
 
 private fun BookFilter.label(): String = when (this) {
@@ -518,4 +537,6 @@ private fun BookFilter.label(): String = when (this) {
     BookFilter.EPUB     -> "EPUB"
     BookFilter.DOCX     -> "DOCX"
     BookFilter.WEB      -> "Web"
+    BookFilter.TXT      -> "TXT"
+    BookFilter.OTHER    -> "Other"
 }

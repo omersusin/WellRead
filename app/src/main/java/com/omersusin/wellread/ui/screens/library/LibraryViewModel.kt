@@ -9,6 +9,7 @@ import com.omersusin.wellread.domain.model.BookType
 import com.omersusin.wellread.utils.DataStoreManager
 import com.omersusin.wellread.utils.FileParser
 import com.omersusin.wellread.utils.ParseResult
+import com.omersusin.wellread.utils.TextProcessor
 import com.omersusin.wellread.utils.WebImporter
 import com.omersusin.wellread.utils.WebImportResult
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,14 +22,14 @@ data class LibraryUiState(
     val filteredBooks: List<Book> = emptyList(),
     val searchQuery: String = "",
     val selectedFilter: BookFilter = BookFilter.ALL,
-    val isLoading: Boolean = false,
     val isImporting: Boolean = false,
     val importError: String? = null,
     val showAddDialog: Boolean = false,
-    val showUrlDialog: Boolean = false
+    val showUrlDialog: Boolean = false,
+    val showClipboardDialog: Boolean = false
 )
 
-enum class BookFilter { ALL, READING, FINISHED, PDF, EPUB, DOCX, WEB }
+enum class BookFilter { ALL, READING, FINISHED, PDF, EPUB, DOCX, WEB, TXT, OTHER }
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
@@ -82,14 +83,17 @@ class LibraryViewModel @Inject constructor(
             .filter { book ->
                 when (filter) {
                     BookFilter.ALL      -> true
-                    BookFilter.READING  -> !book.isFinished
+                    BookFilter.READING  -> !book.isFinished && book.currentPosition > 0
                     BookFilter.FINISHED -> book.isFinished
                     BookFilter.PDF      -> book.type == BookType.PDF
                     BookFilter.EPUB     -> book.type == BookType.EPUB
                     BookFilter.DOCX     -> book.type == BookType.DOCX
                     BookFilter.WEB      -> book.type == BookType.WEB
+                    BookFilter.TXT      -> book.type == BookType.TXT
+                    BookFilter.OTHER    -> book.type in listOf(BookType.MARKDOWN, BookType.HTML, BookType.CLIPBOARD)
                 }
             }
+            .sortedByDescending { it.lastReadAt.takeIf { t -> t > 0 } ?: it.addedAt }
 
     fun importFile(uri: Uri, mimeType: String?) {
         viewModelScope.launch {
@@ -98,12 +102,12 @@ class LibraryViewModel @Inject constructor(
                 val uriLower = uri.toString().lowercase()
                 val mime     = mimeType?.lowercase() ?: ""
 
-                val isPdf  = mime.contains("pdf")            || uriLower.endsWith(".pdf")
-                val isEpub = mime.contains("epub")           || uriLower.endsWith(".epub")
-                val isDocx = mime.contains("wordprocessingml") ||
-                             mime.contains("msword")         || uriLower.endsWith(".docx")
-                val isHtml = mime.contains("html")           || uriLower.endsWith(".html") || uriLower.endsWith(".htm")
-                val isMd   = uriLower.endsWith(".md")        || uriLower.endsWith(".markdown")
+                val isPdf      = mime.contains("pdf")              || uriLower.endsWith(".pdf")
+                val isEpub     = mime.contains("epub")             || uriLower.endsWith(".epub")
+                val isDocx     = mime.contains("wordprocessingml") || mime.contains("msword") || uriLower.endsWith(".docx")
+                val isHtml     = mime.contains("html")             || uriLower.endsWith(".html") || uriLower.endsWith(".htm")
+                val isMd       = uriLower.endsWith(".md")          || uriLower.endsWith(".markdown")
+                val isRtf      = mime.contains("rtf")              || uriLower.endsWith(".rtf")
 
                 val result = when {
                     isPdf  -> fileParser.parsePdf(uri)
@@ -111,6 +115,7 @@ class LibraryViewModel @Inject constructor(
                     isDocx -> fileParser.parseDocx(uri)
                     isHtml -> fileParser.parseHtml(uri)
                     isMd   -> fileParser.parseMarkdown(uri)
+                    isRtf  -> fileParser.parseRtf(uri)
                     else   -> fileParser.parseTxt(uri)
                 }
 
@@ -120,39 +125,39 @@ class LibraryViewModel @Inject constructor(
                             isPdf  -> BookType.PDF
                             isEpub -> BookType.EPUB
                             isDocx -> BookType.DOCX
+                            isHtml -> BookType.HTML
+                            isMd   -> BookType.MARKDOWN
                             else   -> BookType.TXT
                         }
                         val rawName = uri.lastPathSegment
-                            ?.substringAfterLast("/")
-                            ?.substringAfterLast("%2F")
-                            ?: "Imported Book"
+                            ?.substringAfterLast("/")?.substringAfterLast("%2F") ?: "Imported Book"
                         val title = rawName
                             .removeSuffix(".pdf").removeSuffix(".epub").removeSuffix(".docx")
                             .removeSuffix(".txt").removeSuffix(".html").removeSuffix(".md")
-                            .replace("%20", " ").trim()
-                            .ifBlank { "Imported Book" }
+                            .removeSuffix(".markdown").removeSuffix(".rtf")
+                            .replace("%20", " ").trim().ifBlank { "Imported Book" }
 
                         bookRepository.insertBook(
                             Book(
                                 title      = title,
                                 type       = type,
                                 filePath   = uri.toString(),
-                                totalWords = result.wordCount
+                                totalWords = result.wordCount,
+                                // For non-file types we cache content; for files we re-parse
+                                content    = ""
                             )
                         )
                     }
-                    is ParseResult.Error -> {
+                    is ParseResult.Error ->
                         _uiState.update { it.copy(importError = result.message) }
-                    }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e   // never swallow cancellation
+                throw e
             } catch (e: OutOfMemoryError) {
                 _uiState.update { it.copy(importError = "File is too large to import.\nTry a smaller file.") }
             } catch (e: Exception) {
                 _uiState.update { it.copy(importError = "Import failed: ${e.message ?: "Unknown error"}") }
             } finally {
-                // Always reset spinner — even if an exception escaped
                 _uiState.update { it.copy(isImporting = false) }
             }
         }
@@ -163,19 +168,18 @@ class LibraryViewModel @Inject constructor(
             _uiState.update { it.copy(isImporting = true, importError = null, showUrlDialog = false) }
             try {
                 when (val result = webImporter.importFromUrl(url)) {
-                    is WebImportResult.Success -> {
+                    is WebImportResult.Success ->
                         bookRepository.insertBook(
                             Book(
                                 title      = result.title,
                                 type       = BookType.WEB,
                                 sourceUrl  = result.sourceUrl,
-                                totalWords = result.wordCount
+                                totalWords = result.wordCount,
+                                content    = result.text   // cache so reader never needs to re-fetch
                             )
                         )
-                    }
-                    is WebImportResult.Error -> {
+                    is WebImportResult.Error ->
                         _uiState.update { it.copy(importError = result.message) }
-                    }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -187,13 +191,41 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    fun importFromClipboard(clipboardText: String, title: String) {
+        if (clipboardText.isBlank()) {
+            _uiState.update { it.copy(importError = "Clipboard is empty.", showClipboardDialog = false) }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isImporting = true, importError = null, showClipboardDialog = false) }
+            try {
+                val trimmed = clipboardText.trim().take(500_000)
+                val wc = TextProcessor.countWords(trimmed)
+                bookRepository.insertBook(
+                    Book(
+                        title      = title.trim().ifBlank { "Clipboard Import" },
+                        type       = BookType.CLIPBOARD,
+                        totalWords = wc,
+                        content    = trimmed
+                    )
+                )
+            } catch (e: Exception) {
+                _uiState.update { it.copy(importError = "Could not save clipboard text: ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(isImporting = false) }
+            }
+        }
+    }
+
     fun deleteBook(book: Book) {
         viewModelScope.launch { bookRepository.deleteBook(book) }
     }
 
-    fun showAddDialog()  = _uiState.update { it.copy(showAddDialog = true) }
-    fun hideAddDialog()  = _uiState.update { it.copy(showAddDialog = false) }
-    fun showUrlDialog()  = _uiState.update { it.copy(showUrlDialog = true, showAddDialog = false) }
-    fun hideUrlDialog()  = _uiState.update { it.copy(showUrlDialog = false) }
-    fun clearError()     = _uiState.update { it.copy(importError = null) }
+    fun showAddDialog()        = _uiState.update { it.copy(showAddDialog = true) }
+    fun hideAddDialog()        = _uiState.update { it.copy(showAddDialog = false) }
+    fun showUrlDialog()        = _uiState.update { it.copy(showUrlDialog = true,  showAddDialog = false) }
+    fun hideUrlDialog()        = _uiState.update { it.copy(showUrlDialog = false) }
+    fun showClipboardDialog()  = _uiState.update { it.copy(showClipboardDialog = true, showAddDialog = false) }
+    fun hideClipboardDialog()  = _uiState.update { it.copy(showClipboardDialog = false) }
+    fun clearError()           = _uiState.update { it.copy(importError = null) }
 }

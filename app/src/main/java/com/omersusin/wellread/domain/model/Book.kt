@@ -12,7 +12,19 @@ data class Book(
     val currentPosition: Int = 0,
     val isFinished: Boolean = false,
     val addedAt: Long = System.currentTimeMillis(),
-    val lastReadAt: Long = 0L
+    val lastReadAt: Long = 0L,
+    /** Cached text – used for WEB, CLIPBOARD, and any other type where
+     *  re-parsing on every open would be expensive or fragile. */
+    val content: String = ""
 )
 
-enum class BookType { PDF, EPUB, TXT, WEB, DOCX }
+enum class BookType {
+    PDF,
+    EPUB,
+    TXT,
+    WEB,
+    DOCX,
+    MARKDOWN,
+    HTML,
+    CLIPBOARD
+}

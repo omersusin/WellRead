@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.omersusin.wellread.domain.model.ReadingMode
 import com.omersusin.wellread.ui.theme.*
+import com.omersusin.wellread.ui.theme.ChunkColor
+import com.omersusin.wellread.ui.theme.ParagraphColor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -82,13 +84,20 @@ fun ReaderScreen(
 
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         when (uiState.currentMode) {
-                            ReadingMode.BIONIC -> BionicModeContent(uiState = uiState, onSeek = viewModel::seekTo)
+                            ReadingMode.BIONIC ->
+                                BionicModeContent(uiState = uiState, onSeek = viewModel::seekTo)
                             ReadingMode.FLASH  -> FlashModeContent(uiState = uiState)
+                            ReadingMode.CHUNK  -> ChunkModeContent(uiState = uiState)
                             ReadingMode.FOCUS  -> FocusModeContent(uiState = uiState)
+                            ReadingMode.PARAGRAPH -> ParagraphModeContent(
+                                uiState    = uiState,
+                                onNext     = viewModel::nextParagraph,
+                                onPrevious = viewModel::previousParagraph
+                            )
                             ReadingMode.TRAIN  -> TrainModeContent(uiState = uiState)
                             ReadingMode.SENTENCE_SWIPE -> SentenceSwipeModeContent(
-                                uiState = uiState,
-                                onSwipe = viewModel::onSentenceSwiped,
+                                uiState    = uiState,
+                                onSwipe    = viewModel::onSentenceSwiped,
                                 onPrevious = viewModel::previousSentence
                             )
                         }
@@ -555,7 +564,9 @@ fun ErrorState(
 fun ReadingMode.modeColor(): Color = when (this) {
     ReadingMode.BIONIC         -> BionicColor
     ReadingMode.FLASH          -> FlashColor
+    ReadingMode.CHUNK          -> ChunkColor
     ReadingMode.FOCUS          -> FocusColor
+    ReadingMode.PARAGRAPH      -> ParagraphColor
     ReadingMode.TRAIN          -> TrainColor
     ReadingMode.SENTENCE_SWIPE -> SwipeColor
 }
