@@ -1,21 +1,27 @@
 package com.omersusin.wellread.ui.screens.stats
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.omersusin.wellread.domain.model.ReadingMode
-import com.omersusin.wellread.ui.screens.reader.*
+import com.omersusin.wellread.ui.screens.reader.modeColor
+import com.omersusin.wellread.ui.screens.reader.modeIcon
+import com.omersusin.wellread.ui.screens.reader.modeLabel
 import com.omersusin.wellread.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -28,14 +34,23 @@ fun StatsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Statistics", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) },
+            LargeTopAppBar(
+                title = {
+                    Text(
+                        "Statistics",
+                        style      = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, "Back")
+                    FilledTonalIconButton(onClick = onNavigateBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                )
             )
         },
         containerColor = MaterialTheme.colorScheme.background
@@ -48,87 +63,102 @@ fun StatsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Overview cards
             OverviewSection(stats = uiState.stats)
-
-            // Streak section
             StreakCard(
                 currentStreak = uiState.stats.currentStreak,
                 longestStreak = uiState.stats.longestStreak,
-                todayMinutes = uiState.stats.todayMinutes,
-                goalMinutes = uiState.stats.dailyGoalMinutes
+                todayMinutes  = uiState.stats.todayMinutes,
+                goalMinutes   = uiState.stats.dailyGoalMinutes
             )
-
-            // Mode breakdown
             ModeBreakdownSection(sessionsPerMode = uiState.stats.sessionsPerMode)
-
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
 
 @Composable
 private fun OverviewSection(stats: com.omersusin.wellread.domain.model.ReadingStats) {
-    Text("Overview", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Text(
+        "Overview",
+        style      = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.ExtraBold
+    )
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        StatOverviewCard(
+        StatCard(
             modifier = Modifier.weight(1f),
-            emoji = "📚",
-            value = formatNumber(stats.totalWordsRead),
-            label = "Words Read",
-            color = WellReadPurple
+            icon     = Icons.Outlined.MenuBook,
+            value    = formatNumber(stats.totalWordsRead),
+            label    = "Words Read",
+            color    = WellReadPurple
         )
-        StatOverviewCard(
+        StatCard(
             modifier = Modifier.weight(1f),
-            emoji = "⏱️",
-            value = "${stats.totalMinutesRead}",
-            label = "Minutes",
-            color = FocusColor
+            icon     = Icons.Outlined.Timer,
+            value    = "${stats.totalMinutesRead}",
+            label    = "Minutes",
+            color    = FocusColor
         )
     }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        StatOverviewCard(
+        StatCard(
             modifier = Modifier.weight(1f),
-            emoji = "⚡",
-            value = "${stats.averageWpm}",
-            label = "Avg WPM",
-            color = FlashColor
+            icon     = Icons.Filled.Bolt,
+            value    = "${stats.averageWpm}",
+            label    = "Avg WPM",
+            color    = FlashColor
         )
-        StatOverviewCard(
+        StatCard(
             modifier = Modifier.weight(1f),
-            emoji = "🔥",
-            value = "${stats.currentStreak}",
-            label = "Day Streak",
-            color = AccentOrange
+            icon     = Icons.Filled.LocalFireDepartment,
+            value    = "${stats.currentStreak}",
+            label    = "Day Streak",
+            color    = AccentOrange
         )
     }
 }
 
 @Composable
-private fun StatOverviewCard(
+private fun StatCard(
     modifier: Modifier = Modifier,
-    emoji: String,
+    icon:  ImageVector,
     value: String,
     label: String,
     color: Color
 ) {
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f)),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.25f))
+        shape    = RoundedCornerShape(22.dp),
+        colors   = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.10f)),
+        border   = BorderStroke(1.dp, color.copy(alpha = 0.22f))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(emoji, fontSize = 24.sp)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = color)
-            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(
+                shape    = RoundedCornerShape(10.dp),
+                color    = color.copy(alpha = 0.18f),
+                modifier = Modifier.size(38.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(icon, null, modifier = Modifier.size(20.dp), tint = color)
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                value,
+                style      = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.ExtraBold,
+                color      = color
+            )
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -141,20 +171,30 @@ private fun StreakCard(
     goalMinutes: Int
 ) {
     val progress = (todayMinutes.toFloat() / goalMinutes).coerceIn(0f, 1f)
+    val animProg by animateFloatAsState(
+        targetValue  = progress,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness    = Spring.StiffnessLow
+        ),
+        label = "streak-progress"
+    )
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+        shape    = RoundedCornerShape(28.dp),
+        colors   = CardDefaults.cardColors(containerColor = Color.Transparent)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
-                    Brush.linearGradient(listOf(WellReadPurple.copy(0.8f), WellReadIndigo.copy(0.9f))),
-                    RoundedCornerShape(24.dp)
+                    Brush.linearGradient(
+                        listOf(WellReadPurple.copy(0.85f), WellReadIndigo.copy(0.95f))
+                    ),
+                    RoundedCornerShape(28.dp)
                 )
-                .padding(20.dp)
+                .padding(22.dp)
         ) {
             Column {
                 Row(
@@ -162,22 +202,59 @@ private fun StreakCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("🔥 Current Streak", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(0.7f))
-                        Text("$currentStreak days", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.LocalFireDepartment, null,
+                                modifier = Modifier.size(18.dp),
+                                tint     = Color(0xFFFFB74D)
+                            )
+                            Text(
+                                "Current Streak",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White.copy(0.75f)
+                            )
+                        }
+                        Text(
+                            "$currentStreak days",
+                            style      = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color      = Color.White
+                        )
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("Best", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(0.7f))
-                        Text("$longestStreak days", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text(
+                            "Best",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White.copy(0.75f)
+                        )
+                        Text(
+                            "$longestStreak days",
+                            style      = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color      = Color.White
+                        )
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Today: $todayMinutes / $goalMinutes min", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(0.85f))
-                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Today: $todayMinutes / $goalMinutes min",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(0.85f)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
                 Box(
-                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape).background(Color.White.copy(0.2f))
+                    modifier = Modifier
+                        .fillMaxWidth().height(8.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(0.2f))
                 ) {
                     Box(
-                        modifier = Modifier.fillMaxWidth(progress).fillMaxHeight().clip(CircleShape).background(Color.White)
+                        modifier = Modifier
+                            .fillMaxWidth(animProg).fillMaxHeight()
+                            .clip(CircleShape).background(Color.White)
                     )
                 }
             }
@@ -188,22 +265,29 @@ private fun StreakCard(
 @Composable
 private fun ModeBreakdownSection(sessionsPerMode: Map<ReadingMode, Int>) {
     val total = sessionsPerMode.values.sum().coerceAtLeast(1)
-    Text("Mode Breakdown", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Text(
+        "Mode Breakdown",
+        style      = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.ExtraBold
+    )
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+        shape    = RoundedCornerShape(22.dp),
+        colors   = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        )
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
             ReadingMode.values().forEach { mode ->
                 val count = sessionsPerMode[mode] ?: 0
-                val pct = count.toFloat() / total
+                val pct   = count.toFloat() / total
                 ModeProgressRow(
-                    emoji = mode.modeEmoji(),
-                    label = mode.modeLabel(),
-                    count = count,
-                    progress = pct,
-                    color = mode.modeColor()
+                    mode     = mode,
+                    count    = count,
+                    progress = pct
                 )
             }
         }
@@ -212,36 +296,62 @@ private fun ModeBreakdownSection(sessionsPerMode: Map<ReadingMode, Int>) {
 
 @Composable
 private fun ModeProgressRow(
-    emoji: String,
-    label: String,
+    mode: ReadingMode,
     count: Int,
-    progress: Float,
-    color: Color
+    progress: Float
 ) {
+    val animProg by animateFloatAsState(
+        targetValue  = progress,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label        = "mode-prog-${mode.name}"
+    )
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment     = Alignment.CenterVertically
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(emoji, fontSize = 18.sp)
-                Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape    = RoundedCornerShape(8.dp),
+                    color    = mode.modeColor().copy(alpha = 0.15f),
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Icon(
+                            mode.modeIcon(), null,
+                            modifier = Modifier.size(16.dp),
+                            tint     = mode.modeColor()
+                        )
+                    }
+                }
+                Text(
+                    mode.modeLabel(),
+                    style      = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
-            Text("$count sessions", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "$count sessions",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
-            color = color,
-            trackColor = color.copy(alpha = 0.15f)
+            progress   = { animProg },
+            modifier   = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+            color      = mode.modeColor(),
+            trackColor = mode.modeColor().copy(alpha = 0.15f)
         )
     }
 }
 
 private fun formatNumber(n: Int): String = when {
     n >= 1_000_000 -> "${n / 1_000_000}M"
-    n >= 1_000 -> "${n / 1_000}K"
-    else -> n.toString()
+    n >= 1_000     -> "${n / 1_000}K"
+    else           -> n.toString()
 }

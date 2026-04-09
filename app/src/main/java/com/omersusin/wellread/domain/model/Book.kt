@@ -15,4 +15,4 @@ data class Book(
     val lastReadAt: Long = 0L
 )
 
-enum class BookType { PDF, EPUB, TXT, WEB }
+enum class BookType { PDF, EPUB, TXT, WEB, DOCX }

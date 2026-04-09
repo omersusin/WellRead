@@ -28,7 +28,7 @@ data class LibraryUiState(
     val showUrlDialog: Boolean = false
 )
 
-enum class BookFilter { ALL, READING, FINISHED, PDF, EPUB, WEB }
+enum class BookFilter { ALL, READING, FINISHED, PDF, EPUB, DOCX, WEB }
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
@@ -72,36 +72,45 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    private fun filterBooks(books: List<Book>, query: String, filter: BookFilter): List<Book> {
-        return books
+    private fun filterBooks(books: List<Book>, query: String, filter: BookFilter): List<Book> =
+        books
             .filter { book ->
-                if (query.isBlank()) true
-                else book.title.contains(query, ignoreCase = true) ||
-                        book.author.contains(query, ignoreCase = true)
+                query.isBlank() ||
+                book.title.contains(query, ignoreCase = true) ||
+                book.author.contains(query, ignoreCase = true)
             }
             .filter { book ->
                 when (filter) {
-                    BookFilter.ALL -> true
-                    BookFilter.READING -> !book.isFinished
+                    BookFilter.ALL      -> true
+                    BookFilter.READING  -> !book.isFinished
                     BookFilter.FINISHED -> book.isFinished
-                    BookFilter.PDF -> book.type == BookType.PDF
-                    BookFilter.EPUB -> book.type == BookType.EPUB
-                    BookFilter.WEB -> book.type == BookType.WEB
+                    BookFilter.PDF      -> book.type == BookType.PDF
+                    BookFilter.EPUB     -> book.type == BookType.EPUB
+                    BookFilter.DOCX     -> book.type == BookType.DOCX
+                    BookFilter.WEB      -> book.type == BookType.WEB
                 }
             }
-    }
 
     fun importFile(uri: Uri, mimeType: String?) {
         viewModelScope.launch {
             _uiState.update { it.copy(isImporting = true, importError = null) }
 
-            val uriStr = uri.toString().lowercase()
-            val isPdf = mimeType?.contains("pdf") == true || uriStr.contains(".pdf")
-            val isEpub = mimeType?.contains("epub") == true || uriStr.contains(".epub")
+            val uriLower = uri.toString().lowercase()
+            val mime     = mimeType?.lowercase() ?: ""
+
+            val isPdf  = mime.contains("pdf")     || uriLower.endsWith(".pdf")
+            val isEpub = mime.contains("epub")    || uriLower.endsWith(".epub")
+            val isDocx = mime.contains("wordprocessingml") ||
+                         mime.contains("msword")  || uriLower.endsWith(".docx")
+            val isHtml = mime.contains("html")    || uriLower.endsWith(".html") || uriLower.endsWith(".htm")
+            val isMd   = uriLower.endsWith(".md") || uriLower.endsWith(".markdown")
 
             val result = when {
                 isPdf  -> fileParser.parsePdf(uri)
                 isEpub -> fileParser.parseEpub(uri)
+                isDocx -> fileParser.parseDocx(uri)
+                isHtml -> fileParser.parseHtml(uri)
+                isMd   -> fileParser.parseMarkdown(uri)
                 else   -> fileParser.parseTxt(uri)
             }
 
@@ -110,6 +119,7 @@ class LibraryViewModel @Inject constructor(
                     val type = when {
                         isPdf  -> BookType.PDF
                         isEpub -> BookType.EPUB
+                        isDocx -> BookType.DOCX
                         else   -> BookType.TXT
                     }
                     val rawName = uri.lastPathSegment
@@ -117,14 +127,16 @@ class LibraryViewModel @Inject constructor(
                         ?.substringAfterLast("%2F")
                         ?: "Imported Book"
                     val title = rawName
-                        .removeSuffix(".pdf").removeSuffix(".epub").removeSuffix(".txt")
+                        .removeSuffix(".pdf").removeSuffix(".epub").removeSuffix(".docx")
+                        .removeSuffix(".txt").removeSuffix(".html").removeSuffix(".md")
                         .replace("%20", " ").trim()
                         .ifBlank { "Imported Book" }
+
                     bookRepository.insertBook(
                         Book(
                             title = title,
-                            type = type,
-                            filePath = uri.toString(),
+                            type  = type,
+                            filePath   = uri.toString(),
                             totalWords = result.wordCount
                         )
                     )
@@ -144,9 +156,9 @@ class LibraryViewModel @Inject constructor(
                 is WebImportResult.Success -> {
                     bookRepository.insertBook(
                         Book(
-                            title = result.title,
-                            type = BookType.WEB,
-                            sourceUrl = result.sourceUrl,
+                            title      = result.title,
+                            type       = BookType.WEB,
+                            sourceUrl  = result.sourceUrl,
                             totalWords = result.wordCount
                         )
                     )
@@ -163,9 +175,9 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch { bookRepository.deleteBook(book) }
     }
 
-    fun showAddDialog() = _uiState.update { it.copy(showAddDialog = true) }
-    fun hideAddDialog() = _uiState.update { it.copy(showAddDialog = false) }
-    fun showUrlDialog() = _uiState.update { it.copy(showUrlDialog = true, showAddDialog = false) }
-    fun hideUrlDialog() = _uiState.update { it.copy(showUrlDialog = false) }
-    fun clearError() = _uiState.update { it.copy(importError = null) }
+    fun showAddDialog()  = _uiState.update { it.copy(showAddDialog = true) }
+    fun hideAddDialog()  = _uiState.update { it.copy(showAddDialog = false) }
+    fun showUrlDialog()  = _uiState.update { it.copy(showUrlDialog = true, showAddDialog = false) }
+    fun hideUrlDialog()  = _uiState.update { it.copy(showUrlDialog = false) }
+    fun clearError()     = _uiState.update { it.copy(importError = null) }
 }
