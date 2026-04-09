@@ -107,17 +107,34 @@ class FileParser @Inject constructor(
     // ── TXT ────────────────────────────────────────────────────────────────────
     suspend fun parseTxt(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
         try {
-            val stream = context.contentResolver.openInputStream(uri)
-                ?: return@withContext ParseResult.Error("Cannot open file")
-            val text = try {
-                stream.use { it.bufferedReader(Charsets.UTF_8).readText() }
-            } catch (_: Exception) {
-                context.contentResolver.openInputStream(uri)
-                    ?.use { it.bufferedReader(Charsets.ISO_8859_1).readText() }
-                    ?: return@withContext ParseResult.Error("Cannot read file")
+            withTimeout(30_000L) {
+                val stream = context.contentResolver.openInputStream(uri)
+                    ?: return@withTimeout ParseResult.Error("Cannot open file")
+                val text = try {
+                    stream.use { s ->
+                        // Read in chunks with a size cap to prevent OOM
+                        val sb = StringBuilder()
+                        val reader = s.bufferedReader(Charsets.UTF_8)
+                        val buf = CharArray(64 * 1024)
+                        var read: Int
+                        var total = 0
+                        while (reader.read(buf).also { read = it } != -1) {
+                            sb.append(buf, 0, read)
+                            total += read
+                            if (total > 10 * 1024 * 1024) break // 10 MB cap for TXT
+                        }
+                        sb.toString()
+                    }
+                } catch (_: Exception) {
+                    context.contentResolver.openInputStream(uri)
+                        ?.use { it.bufferedReader(Charsets.ISO_8859_1).readText() }
+                        ?: return@withTimeout ParseResult.Error("Cannot read file")
+                }
+                if (text.isBlank()) return@withTimeout ParseResult.Error("File is empty")
+                ParseResult.Success(text.trim(), TextProcessor.countWords(text))
             }
-            if (text.isBlank()) return@withContext ParseResult.Error("File is empty")
-            ParseResult.Success(text.trim(), TextProcessor.countWords(text))
+        } catch (e: TimeoutCancellationException) {
+            ParseResult.Error("File loading timed out. The file may be too large.")
         } catch (e: CancellationException) { throw e
         } catch (e: Exception) {
             ParseResult.Error(e.message ?: "Unknown error")

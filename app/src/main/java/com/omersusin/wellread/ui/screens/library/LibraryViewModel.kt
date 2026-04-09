@@ -94,57 +94,66 @@ class LibraryViewModel @Inject constructor(
     fun importFile(uri: Uri, mimeType: String?) {
         viewModelScope.launch {
             _uiState.update { it.copy(isImporting = true, importError = null) }
+            try {
+                val uriLower = uri.toString().lowercase()
+                val mime     = mimeType?.lowercase() ?: ""
 
-            val uriLower = uri.toString().lowercase()
-            val mime     = mimeType?.lowercase() ?: ""
+                val isPdf  = mime.contains("pdf")            || uriLower.endsWith(".pdf")
+                val isEpub = mime.contains("epub")           || uriLower.endsWith(".epub")
+                val isDocx = mime.contains("wordprocessingml") ||
+                             mime.contains("msword")         || uriLower.endsWith(".docx")
+                val isHtml = mime.contains("html")           || uriLower.endsWith(".html") || uriLower.endsWith(".htm")
+                val isMd   = uriLower.endsWith(".md")        || uriLower.endsWith(".markdown")
 
-            val isPdf  = mime.contains("pdf")     || uriLower.endsWith(".pdf")
-            val isEpub = mime.contains("epub")    || uriLower.endsWith(".epub")
-            val isDocx = mime.contains("wordprocessingml") ||
-                         mime.contains("msword")  || uriLower.endsWith(".docx")
-            val isHtml = mime.contains("html")    || uriLower.endsWith(".html") || uriLower.endsWith(".htm")
-            val isMd   = uriLower.endsWith(".md") || uriLower.endsWith(".markdown")
+                val result = when {
+                    isPdf  -> fileParser.parsePdf(uri)
+                    isEpub -> fileParser.parseEpub(uri)
+                    isDocx -> fileParser.parseDocx(uri)
+                    isHtml -> fileParser.parseHtml(uri)
+                    isMd   -> fileParser.parseMarkdown(uri)
+                    else   -> fileParser.parseTxt(uri)
+                }
 
-            val result = when {
-                isPdf  -> fileParser.parsePdf(uri)
-                isEpub -> fileParser.parseEpub(uri)
-                isDocx -> fileParser.parseDocx(uri)
-                isHtml -> fileParser.parseHtml(uri)
-                isMd   -> fileParser.parseMarkdown(uri)
-                else   -> fileParser.parseTxt(uri)
-            }
+                when (result) {
+                    is ParseResult.Success -> {
+                        val type = when {
+                            isPdf  -> BookType.PDF
+                            isEpub -> BookType.EPUB
+                            isDocx -> BookType.DOCX
+                            else   -> BookType.TXT
+                        }
+                        val rawName = uri.lastPathSegment
+                            ?.substringAfterLast("/")
+                            ?.substringAfterLast("%2F")
+                            ?: "Imported Book"
+                        val title = rawName
+                            .removeSuffix(".pdf").removeSuffix(".epub").removeSuffix(".docx")
+                            .removeSuffix(".txt").removeSuffix(".html").removeSuffix(".md")
+                            .replace("%20", " ").trim()
+                            .ifBlank { "Imported Book" }
 
-            when (result) {
-                is ParseResult.Success -> {
-                    val type = when {
-                        isPdf  -> BookType.PDF
-                        isEpub -> BookType.EPUB
-                        isDocx -> BookType.DOCX
-                        else   -> BookType.TXT
-                    }
-                    val rawName = uri.lastPathSegment
-                        ?.substringAfterLast("/")
-                        ?.substringAfterLast("%2F")
-                        ?: "Imported Book"
-                    val title = rawName
-                        .removeSuffix(".pdf").removeSuffix(".epub").removeSuffix(".docx")
-                        .removeSuffix(".txt").removeSuffix(".html").removeSuffix(".md")
-                        .replace("%20", " ").trim()
-                        .ifBlank { "Imported Book" }
-
-                    bookRepository.insertBook(
-                        Book(
-                            title = title,
-                            type  = type,
-                            filePath   = uri.toString(),
-                            totalWords = result.wordCount
+                        bookRepository.insertBook(
+                            Book(
+                                title      = title,
+                                type       = type,
+                                filePath   = uri.toString(),
+                                totalWords = result.wordCount
+                            )
                         )
-                    )
-                    _uiState.update { it.copy(isImporting = false) }
+                    }
+                    is ParseResult.Error -> {
+                        _uiState.update { it.copy(importError = result.message) }
+                    }
                 }
-                is ParseResult.Error -> {
-                    _uiState.update { it.copy(isImporting = false, importError = result.message) }
-                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e   // never swallow cancellation
+            } catch (e: OutOfMemoryError) {
+                _uiState.update { it.copy(importError = "File is too large to import.\nTry a smaller file.") }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(importError = "Import failed: ${e.message ?: "Unknown error"}") }
+            } finally {
+                // Always reset spinner — even if an exception escaped
+                _uiState.update { it.copy(isImporting = false) }
             }
         }
     }
@@ -152,21 +161,28 @@ class LibraryViewModel @Inject constructor(
     fun importFromUrl(url: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isImporting = true, importError = null, showUrlDialog = false) }
-            when (val result = webImporter.importFromUrl(url)) {
-                is WebImportResult.Success -> {
-                    bookRepository.insertBook(
-                        Book(
-                            title      = result.title,
-                            type       = BookType.WEB,
-                            sourceUrl  = result.sourceUrl,
-                            totalWords = result.wordCount
+            try {
+                when (val result = webImporter.importFromUrl(url)) {
+                    is WebImportResult.Success -> {
+                        bookRepository.insertBook(
+                            Book(
+                                title      = result.title,
+                                type       = BookType.WEB,
+                                sourceUrl  = result.sourceUrl,
+                                totalWords = result.wordCount
+                            )
                         )
-                    )
-                    _uiState.update { it.copy(isImporting = false) }
+                    }
+                    is WebImportResult.Error -> {
+                        _uiState.update { it.copy(importError = result.message) }
+                    }
                 }
-                is WebImportResult.Error -> {
-                    _uiState.update { it.copy(isImporting = false, importError = result.message) }
-                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(importError = "Import failed: ${e.message ?: "Unknown error"}") }
+            } finally {
+                _uiState.update { it.copy(isImporting = false) }
             }
         }
     }
