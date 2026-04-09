@@ -63,6 +63,7 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // ── Appearance ──────────────────────────────────────────────────
             SettingsSectionHeader(icon = Icons.Outlined.Palette, title = "Appearance")
             SettingsCard {
                 SwitchSettingRow(
@@ -82,6 +83,7 @@ fun SettingsScreen(
                 )
             }
 
+            // ── Reading ─────────────────────────────────────────────────────
             SettingsSectionHeader(icon = Icons.Outlined.AutoStories, title = "Reading")
             SettingsCard {
                 SliderSettingRow(
@@ -115,6 +117,7 @@ fun SettingsScreen(
                 )
             }
 
+            // ── Default Mode ────────────────────────────────────────────────
             SettingsSectionHeader(icon = Icons.Outlined.Bolt, title = "Default Reading Mode")
             SettingsCard {
                 ReadingMode.values().forEachIndexed { index, mode ->
@@ -129,6 +132,7 @@ fun SettingsScreen(
                 }
             }
 
+            // ── Goals ───────────────────────────────────────────────────────
             SettingsSectionHeader(icon = Icons.Outlined.TrackChanges, title = "Goals")
             SettingsCard {
                 SliderSettingRow(
@@ -142,6 +146,7 @@ fun SettingsScreen(
                 )
             }
 
+            // ── About ───────────────────────────────────────────────────────
             SettingsSectionHeader(icon = Icons.Outlined.Info, title = "About")
             SettingsCard {
                 Row(
@@ -181,6 +186,8 @@ fun SettingsScreen(
         }
     }
 }
+
+// ── Reusable components ───────────────────────────────────────────────────────
 
 @Composable
 private fun SettingsSectionHeader(icon: ImageVector, title: String) {
@@ -242,7 +249,7 @@ private fun SwitchSettingRow(
             }
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(title,    style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            Text(title,   style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)

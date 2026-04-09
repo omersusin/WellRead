@@ -188,9 +188,12 @@ class FileParser @Inject constructor(
                         "Not a valid DOCX file.\nPlease ensure the file is a .docx document."
                     )
 
+                // Extract text from w:t elements, add paragraph breaks at w:p
                 val sb = StringBuilder()
                 val wt = Regex("""<w:t[^>]*>([^<]*)</w:t>""")
+                val wp = Regex("""</w:p>""")
 
+                // Process paragraph by paragraph
                 xml.split("</w:p>").forEach { para ->
                     val words = wt.findAll(para).map { it.groupValues[1] }.joinToString("")
                     if (words.isNotBlank()) sb.append(words.trim()).append("\n")
@@ -234,6 +237,7 @@ class FileParser @Inject constructor(
             val stream = context.contentResolver.openInputStream(uri)
                 ?: return@withContext ParseResult.Error("Cannot open file")
             val raw = stream.use { it.bufferedReader(Charsets.UTF_8).readText() }
+            // Strip markdown syntax to get plain text
             val text = raw
                 .replace(Regex("^#{1,6}\\s+", RegexOption.MULTILINE), "")
                 .replace(Regex("\\*\\*([^*]+)\\*\\*"), "$1")
