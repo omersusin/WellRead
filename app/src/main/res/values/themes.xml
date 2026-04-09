@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.WellRead" parent="Theme.Material3.DayNight.NoActionBar"/>
+    <style name="Theme.WellRead" parent="android:Theme.Material.Light.NoActionBar"/>
     <style name="Theme.WellRead.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">#0F0F1A</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash</item>
