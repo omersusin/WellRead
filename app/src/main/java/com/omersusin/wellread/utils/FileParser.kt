@@ -3,8 +3,13 @@ package com.omersusin.wellread.utils
 import android.content.Context
 import android.net.Uri
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import org.jsoup.Jsoup
+import java.util.zip.ZipInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -12,24 +17,29 @@ import javax.inject.Singleton
 class FileParser @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+
+    // ── PDF ────────────────────────────────────────────────────────
     suspend fun parsePdf(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
         try {
-            val inputStream = context.contentResolver.openInputStream(uri)
-                ?: return@withContext ParseResult.Error("Cannot open file")
+            withTimeout(30_000L) {
+                val bytes = context.contentResolver.openInputStream(uri)
+                    ?.use { it.readBytes() }
+                    ?: return@withTimeout ParseResult.Error("Cannot open file")
 
-            val bytes = inputStream.readBytes()
-            inputStream.close()
-
-            val text = extractTextFromPdf(bytes)
-
-            if (text.isBlank() || text.length < 20) {
-                return@withContext ParseResult.Error(
-                    "Could not extract text from this PDF. " +
-                    "The file may be scanned/image-based or encrypted."
-                )
+                val text = extractTextFromPdf(bytes)
+                if (text.isBlank() || text.length < 20) {
+                    return@withTimeout ParseResult.Error(
+                        "Could not extract text from this PDF.\n" +
+                        "The file may be scanned/image-based or encrypted.\n\n" +
+                        "Try a text-based PDF or TXT file."
+                    )
+                }
+                ParseResult.Success(text.trim(), TextProcessor.countWords(text))
             }
-
-            ParseResult.Success(text.trim(), TextProcessor.countWords(text))
+        } catch (e: TimeoutCancellationException) {
+            ParseResult.Error("PDF loading timed out. The file may be too large.")
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             ParseResult.Error("PDF error: ${e.message ?: "Unknown error"}")
         }
@@ -38,221 +48,147 @@ class FileParser @Inject constructor(
     private fun extractTextFromPdf(bytes: ByteArray): String {
         val sb = StringBuilder()
         try {
-            // Strategy 1: Extract text between BT and ET markers
             val content = String(bytes, Charsets.ISO_8859_1)
-
-            // Find all text showing operators: Tj, TJ, '  "
             val tjPattern = Regex("""\(([^)\\]*(?:\\.[^)\\]*)*)\)\s*Tj""")
             val tjArrayPattern = Regex("""\[([^\]]*)\]\s*TJ""")
             val stringPattern = Regex("""\(([^)\\]*(?:\\.[^)\\]*)*)\)""")
-
-            // Extract BT...ET blocks
             val btEtPattern = Regex("""BT(.*?)ET""", RegexOption.DOT_MATCHES_ALL)
-            val blocks = btEtPattern.findAll(content)
 
             var foundInBlocks = false
-            blocks.forEach { block ->
+            btEtPattern.findAll(content).forEach { block ->
                 val blockText = block.groupValues[1]
-
-                // Find Tj operators
                 tjPattern.findAll(blockText).forEach { match ->
                     val text = decodePdfString(match.groupValues[1])
-                    if (text.isNotBlank()) {
-                        sb.append(text).append(" ")
-                        foundInBlocks = true
-                    }
+                    if (text.isNotBlank()) { sb.append(text).append(" "); foundInBlocks = true }
                 }
-
-                // Find TJ arrays
                 tjArrayPattern.findAll(blockText).forEach { match ->
-                    val arrayContent = match.groupValues[1]
-                    stringPattern.findAll(arrayContent).forEach { strMatch ->
+                    stringPattern.findAll(match.groupValues[1]).forEach { strMatch ->
                         val text = decodePdfString(strMatch.groupValues[1])
-                        if (text.isNotBlank()) {
-                            sb.append(text)
-                            foundInBlocks = true
-                        }
+                        if (text.isNotBlank()) { sb.append(text); foundInBlocks = true }
                     }
                     sb.append(" ")
                 }
             }
 
-            // Strategy 2: If blocks didn't work, try raw string extraction
             if (!foundInBlocks || sb.length < 50) {
                 sb.clear()
-                // Find all parenthesized strings in the document
-                val allStrings = stringPattern.findAll(content)
-                allStrings.forEach { match ->
+                stringPattern.findAll(content).forEach { match ->
                     val text = decodePdfString(match.groupValues[1])
-                    // Filter out non-text content (binary data, etc.)
                     if (text.length > 1 && text.all { c ->
-                        c.code in 32..126 || c == '\n' || c == '\r' || c == '\t'
-                    }) {
+                            c.code in 32..126 || c == '\n' || c == '\r' || c == '\t'
+                        }) {
                         sb.append(text).append(" ")
                     }
                 }
             }
 
-            // Strategy 3: UTF-16 encoded PDFs
             if (sb.length < 50) {
                 sb.clear()
                 try {
                     val utf16Content = String(bytes, Charsets.UTF_16BE)
-                    val readable = utf16Content.filter { c ->
-                        c.code in 32..126 || c == '\n'
-                    }
-                    if (readable.length > 100) {
-                        sb.append(readable)
-                    }
-                } catch (e: Exception) {
-                    // ignore
-                }
+                    val readable = utf16Content.filter { c -> c.code in 32..126 || c == '\n' }
+                    if (readable.length > 100) sb.append(readable)
+                } catch (_: Exception) {}
             }
 
-        } catch (e: Exception) {
-            // Strategy 4: Last resort - read as latin1 and filter printable chars
+        } catch (_: Exception) {
             try {
                 val raw = String(bytes, Charsets.ISO_8859_1)
                 val words = StringBuilder()
-                var wordBuffer = StringBuilder()
-
+                var buf = StringBuilder()
                 for (c in raw) {
-                    if (c.code in 32..126) {
-                        wordBuffer.append(c)
-                    } else {
-                        if (wordBuffer.length > 2) {
-                            words.append(wordBuffer).append(" ")
-                        }
-                        wordBuffer.clear()
+                    if (c.code in 32..126) buf.append(c)
+                    else {
+                        if (buf.length > 2) words.append(buf).append(" ")
+                        buf.clear()
                     }
                 }
                 sb.append(words)
-            } catch (e2: Exception) {
-                // give up
-            }
+            } catch (_: Exception) {}
         }
 
-        // Clean up the extracted text
         return sb.toString()
-            .replace(Regex("[^\\x20-\\x7E\\n\\r\\t]"), " ")
+            .replace(Regex("[^\u0020-\u007E\n\r\t]"), " ")
             .replace(Regex("\\s{3,}"), "\n")
-            .replace(Regex("(?<=[.!?])\\s*\\n\\s*"), "\n")
+            .replace(Regex("(?<=[.!?])\\s*\n\\s*"), "\n")
             .trim()
     }
 
-    private fun decodePdfString(raw: String): String {
-        return raw
-            .replace("\\n", "\n")
-            .replace("\\r", "\r")
-            .replace("\\t", "\t")
-            .replace("\\(", "(")
-            .replace("\\)", ")")
-            .replace("\\\\", "\\")
-            .filter { c -> c.code in 32..126 || c == '\n' || c == '\r' }
-    }
+    private fun decodePdfString(raw: String): String = raw
+        .replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t")
+        .replace("\\(", "(").replace("\\)", ")").replace("\\\\", "\\")
+        .filter { c -> c.code in 32..126 || c == '\n' || c == '\r' }
 
+    // ── TXT ────────────────────────────────────────────────────────
     suspend fun parseTxt(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
         try {
-            val text = context.contentResolver.openInputStream(uri)
-                ?.bufferedReader(Charsets.UTF_8)?.readText()
-                ?: context.contentResolver.openInputStream(uri)
-                    ?.bufferedReader(Charsets.ISO_8859_1)?.readText()
+            val stream = context.contentResolver.openInputStream(uri)
                 ?: return@withContext ParseResult.Error("Cannot open file")
-
+            val text = try {
+                stream.use { it.bufferedReader(Charsets.UTF_8).readText() }
+            } catch (_: Exception) {
+                context.contentResolver.openInputStream(uri)
+                    ?.use { it.bufferedReader(Charsets.ISO_8859_1).readText() }
+                    ?: return@withContext ParseResult.Error("Cannot read file")
+            }
             if (text.isBlank()) return@withContext ParseResult.Error("File is empty")
-
             ParseResult.Success(text.trim(), TextProcessor.countWords(text))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             ParseResult.Error(e.message ?: "Unknown error")
         }
     }
 
+    // ── EPUB ───────────────────────────────────────────────────────
+    // DÜZELTME: Eski parser byte-by-byte pos++ döngüsü kullanıyordu
+    // (5MB EPUB = 5 milyon iterasyon = freeze). Artık ZipInputStream kullanıyoruz.
     suspend fun parseEpub(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
         try {
-            val inputStream = context.contentResolver.openInputStream(uri)
-                ?: return@withContext ParseResult.Error("Cannot open file")
+            withTimeout(60_000L) {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                    ?: return@withTimeout ParseResult.Error("Cannot open file")
 
-            val bytes = inputStream.readBytes()
-            inputStream.close()
+                val sb = StringBuilder()
 
-            // EPUB is a ZIP file - find HTML content files
-            val sb = StringBuilder()
-            var pos = 0
-
-            while (pos < bytes.size - 4) {
-                // ZIP local file header signature: PK\x03\x04
-                if (bytes[pos] == 0x50.toByte() &&
-                    bytes[pos+1] == 0x4B.toByte() &&
-                    bytes[pos+2] == 0x03.toByte() &&
-                    bytes[pos+3] == 0x04.toByte()) {
-
-                    // Skip to filename length
-                    if (pos + 30 < bytes.size) {
-                        val fnLen = (bytes[pos+26].toInt() and 0xFF) or
-                                ((bytes[pos+27].toInt() and 0xFF) shl 8)
-                        val extraLen = (bytes[pos+28].toInt() and 0xFF) or
-                                ((bytes[pos+29].toInt() and 0xFF) shl 8)
-
-                        if (pos + 30 + fnLen < bytes.size) {
-                            val filename = String(bytes, pos + 30, fnLen, Charsets.UTF_8)
-
-                            // Only process HTML/XHTML content files
-                            if (filename.endsWith(".html") || filename.endsWith(".xhtml") ||
-                                filename.endsWith(".htm") || filename.contains("content")) {
-
-                                val dataStart = pos + 30 + fnLen + extraLen
-                                val compressedSize = (bytes[pos+18].toLong() and 0xFF) or
-                                        ((bytes[pos+19].toLong() and 0xFF) shl 8) or
-                                        ((bytes[pos+20].toLong() and 0xFF) shl 16) or
-                                        ((bytes[pos+21].toLong() and 0xFF) shl 24)
-
-                                if (dataStart + compressedSize <= bytes.size && compressedSize > 0) {
-                                    try {
-                                        val compressedData = bytes.copyOfRange(
-                                            dataStart,
-                                            (dataStart + compressedSize).toInt().coerceAtMost(bytes.size)
-                                        )
-                                        val inflater = java.util.zip.Inflater(true)
-                                        inflater.setInput(compressedData)
-                                        val output = ByteArray(compressedSize.toInt() * 4)
-                                        val resultLength = inflater.inflate(output)
-                                        inflater.end()
-
-                                        val html = String(output, 0, resultLength, Charsets.UTF_8)
-                                        val text = html
-                                            .replace(Regex("<style[^>]*>.*?</style>", RegexOption.DOT_MATCHES_ALL), "")
-                                            .replace(Regex("<script[^>]*>.*?</script>", RegexOption.DOT_MATCHES_ALL), "")
-                                            .replace(Regex("<[^>]+>"), " ")
-                                            .replace(Regex("&nbsp;"), " ")
-                                            .replace(Regex("&amp;"), "&")
-                                            .replace(Regex("&lt;"), "<")
-                                            .replace(Regex("&gt;"), ">")
-                                            .replace(Regex("&#?[a-zA-Z0-9]+;"), " ")
-                                            .replace(Regex("\\s{2,}"), " ")
-                                            .trim()
-
-                                        if (text.length > 50) {
-                                            sb.append(text).append("\n\n")
-                                        }
-                                    } catch (e: Exception) {
-                                        // Skip this entry
-                                    }
-                                }
+                ZipInputStream(inputStream.buffered()).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        val name = entry.name.lowercase()
+                        if (!entry.isDirectory &&
+                            (name.endsWith(".html") ||
+                             name.endsWith(".xhtml") ||
+                             name.endsWith(".htm"))
+                        ) {
+                            val htmlBytes = zip.readBytes()
+                            val html = htmlBytes.toString(Charsets.UTF_8)
+                            val text = try {
+                                Jsoup.parse(html).body().text()
+                            } catch (_: Exception) { "" }
+                            if (text.length > 30) {
+                                sb.append(text).append("\n\n")
                             }
                         }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
                     }
                 }
-                pos++
-            }
 
-            val text = sb.toString().trim()
-            if (text.isBlank() || text.length < 50) {
-                return@withContext ParseResult.Error("Could not extract text from EPUB")
+                val text = sb.toString().trim()
+                if (text.isBlank() || text.length < 50) {
+                    return@withTimeout ParseResult.Error(
+                        "Could not extract text from EPUB.\n" +
+                        "The file may be DRM-protected or in an unsupported format."
+                    )
+                }
+                ParseResult.Success(text, TextProcessor.countWords(text))
             }
-
-            ParseResult.Success(text, TextProcessor.countWords(text))
+        } catch (e: TimeoutCancellationException) {
+            ParseResult.Error("EPUB loading timed out. The file may be too large.")
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            ParseResult.Error(e.message ?: "Unknown error")
+            ParseResult.Error("EPUB error: ${e.message ?: "Unknown error"}")
         }
     }
 }
