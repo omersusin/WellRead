@@ -15,10 +15,10 @@ import com.omersusin.wellread.ui.theme.*
 import kotlinx.coroutines.delay
 
 enum class TrainExercise(val label: String, val description: String, val emoji: String) {
-    WORD_FLASH("Word Flash", "Focus on words without sub-vocalizing", "⚡"),
-    EYE_MOVEMENT("Eye Movement", "Train your eyes to move smoothly", "👁️"),
-    PERIPHERAL("Peripheral Vision", "Expand your reading width", "🔭"),
-    COLUMN_SCROLL("Column Read", "Simulate natural book reading", "📰")
+    WORD_FLASH("Word Flash", "Focus on words without sub-vocalizing"),
+    EYE_MOVEMENT("Eye Movement", "Train your eyes to move smoothly"),
+    PERIPHERAL("Peripheral Vision", "Expand your reading width"),
+    COLUMN_SCROLL("Column Read", "Simulate natural book reading")
 }
 
 @Composable
@@ -48,7 +48,7 @@ fun TrainModeContent(uiState: ReaderUiState) {
                     },
                     text = {
                         Text(
-                            "${exercise.emoji} ${exercise.label}",
+                            exercise.label,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = if (currentExercise == exercise) FontWeight.Bold else FontWeight.Normal
                         )
@@ -109,7 +109,7 @@ private fun WordFlashExercise(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("⚡ Word Flash", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TrainColor)
+        Text(" Word Flash", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TrainColor)
         Text("Focus without sub-vocalizing", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(modifier = Modifier.height(48.dp))
         Card(
@@ -165,7 +165,7 @@ private fun EyeMovementExercise(isRunning: Boolean, onToggle: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("👁️ Eye Movement", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TrainColor)
+        Text("️ Eye Movement", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TrainColor)
         Text("Follow the dot with your eyes", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(modifier = Modifier.height(48.dp))
         Box(modifier = Modifier.size(280.dp, 200.dp), contentAlignment = Alignment.Center) {
@@ -210,7 +210,7 @@ private fun PeripheralExercise(words: List<String>, isRunning: Boolean, onToggle
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("🔭 Peripheral Vision", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TrainColor)
+        Text(" Peripheral Vision", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TrainColor)
         Text("Read all three words at once", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(modifier = Modifier.height(48.dp))
         Row(
@@ -251,7 +251,7 @@ private fun ColumnScrollExercise(words: List<String>, wpm: Int, isRunning: Boole
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("📰 Column Read", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TrainColor)
+        Text(" Column Read", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TrainColor)
         Text("Read line by line, top to bottom", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(modifier = Modifier.height(24.dp))
         Card(
