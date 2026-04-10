@@ -9,108 +9,134 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.jsoup.Jsoup
+import java.io.File
 import java.util.zip.ZipInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private const val MAX_BYTES  = 50L * 1024 * 1024  // 50 MB copy cap
+private const val MAX_CHARS  = 500_000             // ~100 K words
+private const val TIMEOUT_MS = 60_000L
 
 @Singleton
 class FileParser @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
 
-    // ── PDF ────────────────────────────────────────────────────────
-    suspend fun parsePdf(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
-        try {
-            withTimeout(30_000L) {
-                val bytes = context.contentResolver.openInputStream(uri)
-                    ?.use { it.readBytes() }
-                    ?: return@withTimeout ParseResult.Error("Cannot open file")
+    // ── Public API ────────────────────────────────────────────────────────────
 
-                val text = extractTextFromPdf(bytes)
-                if (text.isBlank() || text.length < 20) {
-                    return@withTimeout ParseResult.Error(
-                        "Could not extract text from this PDF.\n" +
-                        "The file may be scanned/image-based or encrypted.\n\n" +
-                        "Try a text-based PDF or TXT file."
-                    )
-                }
-                ParseResult.Success(text.trim(), TextProcessor.countWords(text))
-            }
+    suspend fun parsePdf(uri: Uri):      ParseResult = parseViaCache(uri, "pdf",  ::parsePdfFile)
+    suspend fun parseTxt(uri: Uri):      ParseResult = parseViaCache(uri, "txt",  ::parseTxtFile)
+    suspend fun parseEpub(uri: Uri):     ParseResult = parseViaCache(uri, "epub", ::parseEpubFile)
+    suspend fun parseDocx(uri: Uri):     ParseResult = parseViaCache(uri, "docx", ::parseDocxFile)
+    suspend fun parseHtml(uri: Uri):     ParseResult = parseViaCache(uri, "html", ::parseHtmlFile)
+    suspend fun parseMarkdown(uri: Uri): ParseResult = parseViaCache(uri, "md",   ::parseMdFile)
+    suspend fun parseRtf(uri: Uri):      ParseResult = parseViaCache(uri, "rtf",  ::parseRtfFile)
+
+    // ── Pipeline: copy URI -> temp file, parse, delete ────────────────────────
+
+    private suspend fun parseViaCache(
+        uri: Uri,
+        ext: String,
+        parse: (File) -> ParseResult
+    ): ParseResult = withContext(Dispatchers.IO) {
+        var tmp: File? = null
+        try {
+            tmp = withTimeout(30_000L) { copyToCache(uri, ext) }
+                ?: return@withContext ParseResult.Error(
+                    "Could not read the selected file.\n\nMake sure the file is accessible and try again."
+                )
+            withTimeout(TIMEOUT_MS) { parse(tmp) }
         } catch (e: TimeoutCancellationException) {
-            ParseResult.Error("PDF loading timed out. The file may be too large.")
+            ParseResult.Error("Loading timed out. The file may be too large.")
         } catch (e: CancellationException) {
             throw e
+        } catch (e: OutOfMemoryError) {
+            ParseResult.Error("Not enough memory. Try a smaller file.")
         } catch (e: Exception) {
-            ParseResult.Error("PDF error: ${e.message ?: "Unknown error"}")
+            ParseResult.Error("Could not import: ${e.message ?: "Unknown error"}")
+        } finally {
+            try { tmp?.delete() } catch (_: Exception) {}
         }
+    }
+
+    private fun copyToCache(uri: Uri, ext: String): File? {
+        val dest = File(context.cacheDir, "wr_${System.currentTimeMillis()}.$ext")
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().buffered(65536).use { output ->
+                    val buf = ByteArray(65536)
+                    var total = 0L
+                    var n: Int
+                    while (input.read(buf).also { n = it } != -1) {
+                        output.write(buf, 0, n)
+                        total += n
+                        if (total >= MAX_BYTES) break
+                    }
+                }
+            }
+            if (dest.exists() && dest.length() > 0) dest else { dest.delete(); null }
+        } catch (_: Exception) {
+            dest.delete()
+            null
+        }
+    }
+
+    // ── PDF ───────────────────────────────────────────────────────────────────
+
+    private fun parsePdfFile(file: File): ParseResult {
+        val text = extractTextFromPdf(file.readBytes())
+        if (text.isBlank() || text.length < 20)
+            return ParseResult.Error(
+                "Could not extract text from this PDF.\n" +
+                "The file may be scanned/image-based or encrypted.\n\n" +
+                "Try a text-based PDF or convert to TXT/EPUB."
+            )
+        val out = text.take(MAX_CHARS)
+        return ParseResult.Success(out, TextProcessor.countWords(out))
     }
 
     private fun extractTextFromPdf(bytes: ByteArray): String {
         val sb = StringBuilder()
         try {
-            val content = String(bytes, Charsets.ISO_8859_1)
-            val tjPattern = Regex("""\(([^)\\]*(?:\\.[^)\\]*)*)\)\s*Tj""")
-            val tjArrayPattern = Regex("""\[([^\]]*)\]\s*TJ""")
-            val stringPattern = Regex("""\(([^)\\]*(?:\\.[^)\\]*)*)\)""")
-            val btEtPattern = Regex("""BT(.*?)ET""", RegexOption.DOT_MATCHES_ALL)
+            val content   = String(bytes, Charsets.ISO_8859_1)
+            val tjPat     = Regex("""\(([^)\\]*(?:\\.[^)\\]*)*)\)\s*Tj""")
+            val tjaPat    = Regex("""\[([^\]]*)\]\s*TJ""")
+            val strPat    = Regex("""\(([^)\\]*(?:\\.[^)\\]*)*)\)""")
+            val btEtPat   = Regex("""BT(.*?)ET""", RegexOption.DOT_MATCHES_ALL)
+            var found     = false
+            var blockCount = 0
 
-            var foundInBlocks = false
-            btEtPattern.findAll(content).forEach { block ->
-                val blockText = block.groupValues[1]
-                tjPattern.findAll(blockText).forEach { match ->
-                    val text = decodePdfString(match.groupValues[1])
-                    if (text.isNotBlank()) { sb.append(text).append(" "); foundInBlocks = true }
+            for (block in btEtPat.findAll(content)) {
+                if (++blockCount > 3000 || sb.length > MAX_CHARS) break
+                val bt = block.groupValues[1]
+                for (m in tjPat.findAll(bt)) {
+                    val t = decodePdfString(m.groupValues[1])
+                    if (t.isNotBlank()) { sb.append(t).append(' '); found = true }
                 }
-                tjArrayPattern.findAll(blockText).forEach { match ->
-                    stringPattern.findAll(match.groupValues[1]).forEach { strMatch ->
-                        val text = decodePdfString(strMatch.groupValues[1])
-                        if (text.isNotBlank()) { sb.append(text); foundInBlocks = true }
+                for (m in tjaPat.findAll(bt)) {
+                    for (s in strPat.findAll(m.groupValues[1])) {
+                        val t = decodePdfString(s.groupValues[1])
+                        if (t.isNotBlank()) { sb.append(t); found = true }
                     }
-                    sb.append(" ")
+                    sb.append(' ')
                 }
             }
 
-            if (!foundInBlocks || sb.length < 50) {
+            if (!found || sb.length < 50) {
                 sb.clear()
-                stringPattern.findAll(content).forEach { match ->
-                    val text = decodePdfString(match.groupValues[1])
-                    if (text.length > 1 && text.all { c ->
-                            c.code in 32..126 || c == '\n' || c == '\r' || c == '\t'
-                        }) {
-                        sb.append(text).append(" ")
-                    }
+                var cnt = 0
+                for (m in strPat.findAll(content)) {
+                    if (++cnt > 8000 || sb.length > MAX_CHARS) break
+                    val t = decodePdfString(m.groupValues[1])
+                    if (t.length > 1 && t.all { c -> c.code in 32..126 || c == '\n' })
+                        sb.append(t).append(' ')
                 }
             }
-
-            if (sb.length < 50) {
-                sb.clear()
-                try {
-                    val utf16Content = String(bytes, Charsets.UTF_16BE)
-                    val readable = utf16Content.filter { c -> c.code in 32..126 || c == '\n' }
-                    if (readable.length > 100) sb.append(readable)
-                } catch (_: Exception) {}
-            }
-
-        } catch (_: Exception) {
-            try {
-                val raw = String(bytes, Charsets.ISO_8859_1)
-                val words = StringBuilder()
-                var buf = StringBuilder()
-                for (c in raw) {
-                    if (c.code in 32..126) buf.append(c)
-                    else {
-                        if (buf.length > 2) words.append(buf).append(" ")
-                        buf.clear()
-                    }
-                }
-                sb.append(words)
-            } catch (_: Exception) {}
-        }
-
+        } catch (_: Exception) {}
         return sb.toString()
             .replace(Regex("[^\u0020-\u007E\n\r\t]"), " ")
             .replace(Regex("\\s{3,}"), "\n")
-            .replace(Regex("(?<=[.!?])\\s*\n\\s*"), "\n")
             .trim()
     }
 
@@ -119,165 +145,60 @@ class FileParser @Inject constructor(
         .replace("\\(", "(").replace("\\)", ")").replace("\\\\", "\\")
         .filter { c -> c.code in 32..126 || c == '\n' || c == '\r' }
 
-    // ── TXT ────────────────────────────────────────────────────────
-    suspend fun parseTxt(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
-        try {
-            val stream = context.contentResolver.openInputStream(uri)
-                ?: return@withContext ParseResult.Error("Cannot open file")
-            val text = try {
-                stream.use { it.bufferedReader(Charsets.UTF_8).readText() }
-            } catch (_: Exception) {
-                context.contentResolver.openInputStream(uri)
-                    ?.use { it.bufferedReader(Charsets.ISO_8859_1).readText() }
-                    ?: return@withContext ParseResult.Error("Cannot read file")
-            }
-            if (text.isBlank()) return@withContext ParseResult.Error("File is empty")
-            ParseResult.Success(text.trim(), TextProcessor.countWords(text))
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            ParseResult.Error(e.message ?: "Unknown error")
-        }
+    // ── TXT ───────────────────────────────────────────────────────────────────
+
+    private fun parseTxtFile(file: File): ParseResult {
+        if (file.length() == 0L) return ParseResult.Error("File is empty")
+        val text = try { file.readText(Charsets.UTF_8) }
+                   catch (_: Exception) { file.readText(Charsets.ISO_8859_1) }
+        if (text.isBlank()) return ParseResult.Error("File is empty")
+        val out = text.take(MAX_CHARS)
+        return ParseResult.Success(out.trim(), TextProcessor.countWords(out))
     }
 
-    // ── EPUB ───────────────────────────────────────────────────────
-    // DÜZELTME: Eski parser byte-by-byte pos++ döngüsü kullanıyordu
-    // (5MB EPUB = 5 milyon iterasyon = freeze). Artık ZipInputStream kullanıyoruz.
-    suspend fun parseEpub(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
-        try {
-            withTimeout(60_000L) {
-                val inputStream = context.contentResolver.openInputStream(uri)
-                    ?: return@withTimeout ParseResult.Error("Cannot open file")
+    // ── EPUB ──────────────────────────────────────────────────────────────────
 
-                val sb = StringBuilder()
-
-                ZipInputStream(inputStream.buffered()).use { zip ->
-                    var entry = zip.nextEntry
-                    while (entry != null) {
-                        val name = entry.name.lowercase()
-                        if (!entry.isDirectory &&
-                            (name.endsWith(".html") ||
-                             name.endsWith(".xhtml") ||
-                             name.endsWith(".htm"))
-                        ) {
-                            val htmlBytes = zip.readBytes()
-                            val html = htmlBytes.toString(Charsets.UTF_8)
-                            val text = try {
-                                Jsoup.parse(html).body().text()
-                            } catch (_: Exception) { "" }
-                            if (text.length > 30) {
-                                sb.append(text).append("\n\n")
-                            }
-                        }
-                        zip.closeEntry()
-                        entry = zip.nextEntry
-                    }
+    private fun parseEpubFile(file: File): ParseResult {
+        val sb = StringBuilder()
+        ZipInputStream(file.inputStream().buffered(65536)).use { zip ->
+            var entry = zip.nextEntry
+            while (entry != null) {
+                val name = entry.name.lowercase()
+                if (!entry.isDirectory &&
+                    (name.endsWith(".html") || name.endsWith(".xhtml") || name.endsWith(".htm"))
+                ) {
+                    val html = zip.readBytes().toString(Charsets.UTF_8)
+                    val text = runCatching { Jsoup.parse(html).body().text() }.getOrElse { "" }
+                    if (text.length > 30) sb.append(text).append("\n\n")
                 }
-
-                val text = sb.toString().trim()
-                if (text.isBlank() || text.length < 50) {
-                    return@withTimeout ParseResult.Error(
-                        "Could not extract text from EPUB.\n" +
-                        "The file may be DRM-protected or in an unsupported format."
-                    )
-                }
-                ParseResult.Success(text, TextProcessor.countWords(text))
+                zip.closeEntry()
+                entry = zip.nextEntry
+                if (sb.length > MAX_CHARS) break
             }
-        } catch (e: TimeoutCancellationException) {
-            ParseResult.Error("EPUB loading timed out. The file may be too large.")
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            ParseResult.Error("EPUB error: ${e.message ?: "Unknown error"}")
         }
+        val text = sb.toString().trim()
+        if (text.isBlank() || text.length < 50)
+            return ParseResult.Error(
+                "Could not extract text from EPUB.\n" +
+                "The file may be DRM-protected or in an unsupported format."
+            )
+        val out = text.take(MAX_CHARS)
+        return ParseResult.Success(out, TextProcessor.countWords(out))
     }
-}
 
     // ── DOCX ──────────────────────────────────────────────────────────────────
-    suspend fun parseDocx(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
-        var tempFile: java.io.File? = null
-        try {
-            tempFile = copyToCache(uri, "docx")
-                ?: return@withContext ParseResult.Error("Could not read the selected file.")
-            withTimeout(60_000L) { parseDocxFile(tempFile) }
-        } catch (e: TimeoutCancellationException) {
-            ParseResult.Error("Loading timed out.")
-        } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { ParseResult.Error("Could not import DOCX: ${e.message}") }
-        finally { try { tempFile?.delete() } catch (_: Exception) {} }
-    }
 
-    // ── HTML ──────────────────────────────────────────────────────────────────
-    suspend fun parseHtml(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
-        var tempFile: java.io.File? = null
-        try {
-            tempFile = copyToCache(uri, "html")
-                ?: return@withContext ParseResult.Error("Could not read the selected file.")
-            withTimeout(60_000L) { parseHtmlFile(tempFile) }
-        } catch (e: TimeoutCancellationException) {
-            ParseResult.Error("Loading timed out.")
-        } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { ParseResult.Error("Could not import HTML: ${e.message}") }
-        finally { try { tempFile?.delete() } catch (_: Exception) {} }
-    }
-
-    // ── Markdown ──────────────────────────────────────────────────────────────
-    suspend fun parseMarkdown(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
-        var tempFile: java.io.File? = null
-        try {
-            tempFile = copyToCache(uri, "md")
-                ?: return@withContext ParseResult.Error("Could not read the selected file.")
-            withTimeout(60_000L) { parseMdFile(tempFile) }
-        } catch (e: TimeoutCancellationException) {
-            ParseResult.Error("Loading timed out.")
-        } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { ParseResult.Error("Could not import Markdown: ${e.message}") }
-        finally { try { tempFile?.delete() } catch (_: Exception) {} }
-    }
-
-    // ── RTF ───────────────────────────────────────────────────────────────────
-    suspend fun parseRtf(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
-        var tempFile: java.io.File? = null
-        try {
-            tempFile = copyToCache(uri, "rtf")
-                ?: return@withContext ParseResult.Error("Could not read the selected file.")
-            withTimeout(60_000L) { parseRtfFile(tempFile) }
-        } catch (e: TimeoutCancellationException) {
-            ParseResult.Error("Loading timed out.")
-        } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { ParseResult.Error("Could not import RTF: ${e.message}") }
-        finally { try { tempFile?.delete() } catch (_: Exception) {} }
-    }
-
-    // ── copyToCache helper ────────────────────────────────────────────────────
-    private fun copyToCache(uri: Uri, ext: String): java.io.File? {
-        val dest = java.io.File(context.cacheDir, "wr_${System.currentTimeMillis()}.$ext")
-        return try {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                dest.outputStream().buffered(65536).use { output ->
-                    val buf = ByteArray(65536)
-                    var total = 0L; var n: Int
-                    while (input.read(buf).also { n = it } != -1) {
-                        output.write(buf, 0, n)
-                        total += n
-                        if (total >= 50L * 1024 * 1024) break
-                    }
-                }
-            }
-            if (dest.exists() && dest.length() > 0) dest else { dest.delete(); null }
-        } catch (_: Exception) { dest.delete(); null }
-    }
-
-    // ── File parsers ──────────────────────────────────────────────────────────
-    private fun parseDocxFile(file: java.io.File): ParseResult {
+    private fun parseDocxFile(file: File): ParseResult {
         var xmlContent: String? = null
         ZipInputStream(file.inputStream().buffered()).use { zip ->
             var entry = zip.nextEntry
             while (entry != null) {
                 if (entry.name == "word/document.xml") {
-                    xmlContent = zip.readBytes().toString(Charsets.UTF_8); break
+                    xmlContent = zip.readBytes().toString(Charsets.UTF_8)
+                    break
                 }
-                zip.closeEntry(); entry = zip.nextEntry
+                zip.closeEntry()
+                entry = zip.nextEntry
             }
         }
         val xml = xmlContent ?: return ParseResult.Error("Not a valid DOCX file.")
@@ -286,22 +207,28 @@ class FileParser @Inject constructor(
         for (para in xml.split("</w:p>")) {
             val words = wt.findAll(para).map { it.groupValues[1] }.joinToString("")
             if (words.isNotBlank()) sb.append(words.trim()).append("\n")
-            if (sb.length > 500_000) break
+            if (sb.length > MAX_CHARS) break
         }
-        val text = sb.toString().replace(Regex("\\n{3,}"), "\n\n").trim()
-        if (text.isBlank()) return ParseResult.Error("Could not extract text from DOCX.")
-        return ParseResult.Success(text.take(500_000), TextProcessor.countWords(text))
-    }
-
-    private fun parseHtmlFile(file: java.io.File): ParseResult {
-        val text = Jsoup.parse(file.readText(Charsets.UTF_8)).body().text().trim()
-        if (text.isBlank()) return ParseResult.Error("No text found in HTML file.")
-        val out = text.take(500_000)
+        val text = sb.toString().replace(Regex("\n{3,}"), "\n\n").trim()
+        if (text.isBlank()) return ParseResult.Error("Could not extract text from this DOCX file.")
+        val out = text.take(MAX_CHARS)
         return ParseResult.Success(out, TextProcessor.countWords(out))
     }
 
-    private fun parseMdFile(file: java.io.File): ParseResult {
-        val text = file.readText(Charsets.UTF_8)
+    // ── HTML ──────────────────────────────────────────────────────────────────
+
+    private fun parseHtmlFile(file: File): ParseResult {
+        val text = Jsoup.parse(file.readText(Charsets.UTF_8)).body().text().trim()
+        if (text.isBlank()) return ParseResult.Error("No text found in HTML file.")
+        val out = text.take(MAX_CHARS)
+        return ParseResult.Success(out, TextProcessor.countWords(out))
+    }
+
+    // ── Markdown ──────────────────────────────────────────────────────────────
+
+    private fun parseMdFile(file: File): ParseResult {
+        val raw = file.readText(Charsets.UTF_8)
+        val text = raw
             .replace(Regex("^#{1,6}\\s+", RegexOption.MULTILINE), "")
             .replace(Regex("\\*\\*([^*]+)\\*\\*"), "$1")
             .replace(Regex("\\*([^*]+)\\*"), "$1")
@@ -311,24 +238,48 @@ class FileParser @Inject constructor(
             .replace(Regex("^[-*+]\\s+", RegexOption.MULTILINE), "")
             .trim()
         if (text.isBlank()) return ParseResult.Error("No text found in Markdown file.")
-        val out = text.take(500_000)
+        val out = text.take(MAX_CHARS)
         return ParseResult.Success(out, TextProcessor.countWords(out))
     }
 
-    private fun parseRtfFile(file: java.io.File): ParseResult {
+    // ── RTF ───────────────────────────────────────────────────────────────────
+
+    private fun parseRtfFile(file: File): ParseResult {
         val raw = file.readText(Charsets.ISO_8859_1)
-        val text = raw
-            .replace(Regex("\\{[^{}]*}"), " ")
-            .replace(Regex("\\\\[a-z*]+\\d* ?"), " ")
-            .replace(Regex("\\\\[^a-z]"), "")
+        // Strip RTF control words and groups, keep readable ASCII
+        val sb = StringBuilder()
+        var i = 0
+        var inControl = false
+        while (i < raw.length) {
+            val c = raw[i]
+            when {
+                c == '\\' -> {
+                    inControl = true
+                    // skip the control word or escaped char
+                    i++
+                    if (i < raw.length) {
+                        if (raw[i] == '\'' ) { i += 2 } // hex escape \'xx
+                        else if (raw[i] == '\n' || raw[i] == '\r') { sb.append('\n') }
+                        else { while (i < raw.length && raw[i].isLetter()) i++ }
+                    }
+                    inControl = false
+                    continue
+                }
+                c == '{' || c == '}' -> { /* skip group delimiters */ }
+                c.code in 32..126 -> sb.append(c)
+                c == '\n' || c == '\r' -> sb.append(' ')
+            }
+            i++
+        }
+        val text = sb.toString()
             .replace(Regex("\\s{2,}"), " ")
             .trim()
         if (text.isBlank() || text.length < 20)
             return ParseResult.Error("Could not extract text from RTF file.")
-        val out = text.take(500_000)
+        val out = text.take(MAX_CHARS)
         return ParseResult.Success(out, TextProcessor.countWords(out))
     }
-
+}
 
 sealed class ParseResult {
     data class Success(val text: String, val wordCount: Int) : ParseResult()
