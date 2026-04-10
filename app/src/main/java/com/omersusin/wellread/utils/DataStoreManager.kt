@@ -39,7 +39,7 @@ class DataStoreManager @Inject constructor(
                 isDarkMode = prefs[Keys.DARK_MODE] ?: true,
                 useDynamicColor = prefs[Keys.DYNAMIC_COLOR] ?: true,
                 defaultWpm = prefs[Keys.DEFAULT_WPM] ?: 300,
-                defaultMode = ReadingMode.valueOf(prefs[Keys.DEFAULT_MODE] ?: ReadingMode.BIONIC.name),
+                defaultMode = try { ReadingMode.valueOf(prefs[Keys.DEFAULT_MODE] ?: ReadingMode.BIONIC.name) } catch (_: Exception) { ReadingMode.BIONIC },
                 fontSize = prefs[Keys.FONT_SIZE] ?: 16f,
                 fontFamily = prefs[Keys.FONT_FAMILY] ?: "Inter",
                 dailyGoalMinutes = prefs[Keys.DAILY_GOAL] ?: 20,

@@ -211,7 +211,7 @@ private fun ReaderBottomBar(
     onPrevious: () -> Unit,
     onWpmChange: (Int) -> Unit
 ) {
-    val showControls = uiState.currentMode in listOf(ReadingMode.FLASH, ReadingMode.FOCUS)
+    val showControls = uiState.currentMode in listOf(ReadingMode.FLASH, ReadingMode.FOCUS, ReadingMode.CHUNK)
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -574,7 +574,9 @@ fun ReadingMode.modeColor(): Color = when (this) {
 fun ReadingMode.modeIcon(): ImageVector = when (this) {
     ReadingMode.BIONIC         -> Icons.AutoMirrored.Outlined.MenuBook
     ReadingMode.FLASH          -> Icons.Filled.Bolt
+    ReadingMode.CHUNK          -> Icons.Outlined.DynamicFeed
     ReadingMode.FOCUS          -> Icons.Outlined.CenterFocusStrong
+    ReadingMode.PARAGRAPH      -> Icons.Outlined.ViewAgenda
     ReadingMode.TRAIN          -> Icons.Outlined.FitnessCenter
     ReadingMode.SENTENCE_SWIPE -> Icons.Outlined.SwipeRight
 }
@@ -582,7 +584,9 @@ fun ReadingMode.modeIcon(): ImageVector = when (this) {
 fun ReadingMode.modeLabel(): String = when (this) {
     ReadingMode.BIONIC         -> "Bionic"
     ReadingMode.FLASH          -> "Flash"
+    ReadingMode.CHUNK          -> "Chunk"
     ReadingMode.FOCUS          -> "Focus"
+    ReadingMode.PARAGRAPH      -> "Paragraph"
     ReadingMode.TRAIN          -> "Train"
     ReadingMode.SENTENCE_SWIPE -> "Swipe"
 }
@@ -590,7 +594,9 @@ fun ReadingMode.modeLabel(): String = when (this) {
 fun ReadingMode.modeDescription(): String = when (this) {
     ReadingMode.BIONIC         -> "Bold fixation points for faster recognition"
     ReadingMode.FLASH          -> "RSVP — words flash at your target speed"
+    ReadingMode.CHUNK          -> "RSVP — multiple words at once"
     ReadingMode.FOCUS          -> "Auto-scroll with highlighted word"
+    ReadingMode.PARAGRAPH      -> "One paragraph at a time, swipe to advance"
     ReadingMode.TRAIN          -> "Eye movement exercises"
     ReadingMode.SENTENCE_SWIPE -> "Swipe through sentence by sentence"
 }

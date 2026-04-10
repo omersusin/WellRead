@@ -514,7 +514,7 @@ fun Book.typeIcon(): ImageVector = when (type) {
     BookType.WEB       -> Icons.Outlined.Language
     BookType.DOCX      -> Icons.Outlined.Description
     BookType.MARKDOWN  -> Icons.Outlined.Code
-    BookType.HTML      -> Icons.Outlined.Html
+    BookType.HTML      -> Icons.Outlined.Code
     BookType.CLIPBOARD -> Icons.Outlined.ContentPaste
 }
 
