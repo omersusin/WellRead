@@ -193,6 +193,143 @@ class FileParser @Inject constructor(
     }
 }
 
+    // ── DOCX ──────────────────────────────────────────────────────────────────
+    suspend fun parseDocx(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
+        var tempFile: java.io.File? = null
+        try {
+            tempFile = copyToCache(uri, "docx")
+                ?: return@withContext ParseResult.Error("Could not read the selected file.")
+            withTimeout(60_000L) { parseDocxFile(tempFile) }
+        } catch (e: TimeoutCancellationException) {
+            ParseResult.Error("Loading timed out.")
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { ParseResult.Error("Could not import DOCX: ${e.message}") }
+        finally { try { tempFile?.delete() } catch (_: Exception) {} }
+    }
+
+    // ── HTML ──────────────────────────────────────────────────────────────────
+    suspend fun parseHtml(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
+        var tempFile: java.io.File? = null
+        try {
+            tempFile = copyToCache(uri, "html")
+                ?: return@withContext ParseResult.Error("Could not read the selected file.")
+            withTimeout(60_000L) { parseHtmlFile(tempFile) }
+        } catch (e: TimeoutCancellationException) {
+            ParseResult.Error("Loading timed out.")
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { ParseResult.Error("Could not import HTML: ${e.message}") }
+        finally { try { tempFile?.delete() } catch (_: Exception) {} }
+    }
+
+    // ── Markdown ──────────────────────────────────────────────────────────────
+    suspend fun parseMarkdown(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
+        var tempFile: java.io.File? = null
+        try {
+            tempFile = copyToCache(uri, "md")
+                ?: return@withContext ParseResult.Error("Could not read the selected file.")
+            withTimeout(60_000L) { parseMdFile(tempFile) }
+        } catch (e: TimeoutCancellationException) {
+            ParseResult.Error("Loading timed out.")
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { ParseResult.Error("Could not import Markdown: ${e.message}") }
+        finally { try { tempFile?.delete() } catch (_: Exception) {} }
+    }
+
+    // ── RTF ───────────────────────────────────────────────────────────────────
+    suspend fun parseRtf(uri: Uri): ParseResult = withContext(Dispatchers.IO) {
+        var tempFile: java.io.File? = null
+        try {
+            tempFile = copyToCache(uri, "rtf")
+                ?: return@withContext ParseResult.Error("Could not read the selected file.")
+            withTimeout(60_000L) { parseRtfFile(tempFile) }
+        } catch (e: TimeoutCancellationException) {
+            ParseResult.Error("Loading timed out.")
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { ParseResult.Error("Could not import RTF: ${e.message}") }
+        finally { try { tempFile?.delete() } catch (_: Exception) {} }
+    }
+
+    // ── copyToCache helper ────────────────────────────────────────────────────
+    private fun copyToCache(uri: Uri, ext: String): java.io.File? {
+        val dest = java.io.File(context.cacheDir, "wr_${System.currentTimeMillis()}.$ext")
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().buffered(65536).use { output ->
+                    val buf = ByteArray(65536)
+                    var total = 0L; var n: Int
+                    while (input.read(buf).also { n = it } != -1) {
+                        output.write(buf, 0, n)
+                        total += n
+                        if (total >= 50L * 1024 * 1024) break
+                    }
+                }
+            }
+            if (dest.exists() && dest.length() > 0) dest else { dest.delete(); null }
+        } catch (_: Exception) { dest.delete(); null }
+    }
+
+    // ── File parsers ──────────────────────────────────────────────────────────
+    private fun parseDocxFile(file: java.io.File): ParseResult {
+        var xmlContent: String? = null
+        ZipInputStream(file.inputStream().buffered()).use { zip ->
+            var entry = zip.nextEntry
+            while (entry != null) {
+                if (entry.name == "word/document.xml") {
+                    xmlContent = zip.readBytes().toString(Charsets.UTF_8); break
+                }
+                zip.closeEntry(); entry = zip.nextEntry
+            }
+        }
+        val xml = xmlContent ?: return ParseResult.Error("Not a valid DOCX file.")
+        val sb  = StringBuilder()
+        val wt  = Regex("""<w:t[^>]*>([^<]*)</w:t>""")
+        for (para in xml.split("</w:p>")) {
+            val words = wt.findAll(para).map { it.groupValues[1] }.joinToString("")
+            if (words.isNotBlank()) sb.append(words.trim()).append("\n")
+            if (sb.length > 500_000) break
+        }
+        val text = sb.toString().replace(Regex("\\n{3,}"), "\n\n").trim()
+        if (text.isBlank()) return ParseResult.Error("Could not extract text from DOCX.")
+        return ParseResult.Success(text.take(500_000), TextProcessor.countWords(text))
+    }
+
+    private fun parseHtmlFile(file: java.io.File): ParseResult {
+        val text = Jsoup.parse(file.readText(Charsets.UTF_8)).body().text().trim()
+        if (text.isBlank()) return ParseResult.Error("No text found in HTML file.")
+        val out = text.take(500_000)
+        return ParseResult.Success(out, TextProcessor.countWords(out))
+    }
+
+    private fun parseMdFile(file: java.io.File): ParseResult {
+        val text = file.readText(Charsets.UTF_8)
+            .replace(Regex("^#{1,6}\\s+", RegexOption.MULTILINE), "")
+            .replace(Regex("\\*\\*([^*]+)\\*\\*"), "$1")
+            .replace(Regex("\\*([^*]+)\\*"), "$1")
+            .replace(Regex("`{1,3}[^`]*`{1,3}"), "")
+            .replace(Regex("^>+\\s*", RegexOption.MULTILINE), "")
+            .replace(Regex("!?\\[([^]]*)]\\([^)]*\\)"), "$1")
+            .replace(Regex("^[-*+]\\s+", RegexOption.MULTILINE), "")
+            .trim()
+        if (text.isBlank()) return ParseResult.Error("No text found in Markdown file.")
+        val out = text.take(500_000)
+        return ParseResult.Success(out, TextProcessor.countWords(out))
+    }
+
+    private fun parseRtfFile(file: java.io.File): ParseResult {
+        val raw = file.readText(Charsets.ISO_8859_1)
+        val text = raw
+            .replace(Regex("\\{[^{}]*}"), " ")
+            .replace(Regex("\\\\[a-z*]+\\d* ?"), " ")
+            .replace(Regex("\\\\[^a-z]"), "")
+            .replace(Regex("\\s{2,}"), " ")
+            .trim()
+        if (text.isBlank() || text.length < 20)
+            return ParseResult.Error("Could not extract text from RTF file.")
+        val out = text.take(500_000)
+        return ParseResult.Success(out, TextProcessor.countWords(out))
+    }
+
+
 sealed class ParseResult {
     data class Success(val text: String, val wordCount: Int) : ParseResult()
     data class Error(val message: String) : ParseResult()

@@ -302,28 +302,24 @@ private fun RecentBooksRow(books: List<Book>, onBookClick: (Book) -> Unit) {
 private fun BookCard(book: Book, onClick: () -> Unit) {
     val progress = if (book.totalWords > 0) book.currentPosition.toFloat() / book.totalWords else 0f
     val typeColor = when (book.type) {
-        BookType.PDF  -> BionicColor
-        BookType.EPUB -> FocusColor
-        BookType.TXT  -> TrainColor
-        BookType.WEB  -> FlashColor
-        BookType.DOCX -> SwipeColor
-        BookType.DOCX -> SwipeColor
-        BookType.DOCX -> SwipeColor
-        BookType.DOCX -> SwipeColor
-        BookType.DOCX -> SwipeColor
-        BookType.DOCX -> SwipeColor
+        BookType.PDF       -> BionicColor
+        BookType.EPUB      -> FocusColor
+        BookType.TXT       -> TrainColor
+        BookType.WEB       -> FlashColor
+        BookType.DOCX      -> SwipeColor
+        BookType.MARKDOWN  -> ChunkColor
+        BookType.HTML      -> ParagraphColor
+        BookType.CLIPBOARD -> AccentTeal
     }
     val typeIcon: ImageVector = when (book.type) {
-        BookType.PDF  -> Icons.Outlined.PictureAsPdf
-        BookType.EPUB -> Icons.AutoMirrored.Outlined.MenuBook
-        BookType.TXT  -> Icons.Outlined.Article
-        BookType.WEB  -> Icons.Outlined.Language
-        BookType.DOCX -> Icons.Outlined.Description
-        BookType.DOCX -> Icons.Outlined.Description
-        BookType.DOCX -> Icons.Outlined.Description
-        BookType.DOCX -> Icons.Outlined.Description
-        BookType.DOCX -> Icons.Outlined.Description
-        BookType.DOCX -> Icons.Outlined.Description
+        BookType.PDF       -> Icons.Outlined.PictureAsPdf
+        BookType.EPUB      -> Icons.AutoMirrored.Outlined.MenuBook
+        BookType.TXT       -> Icons.Outlined.Article
+        BookType.WEB       -> Icons.Outlined.Language
+        BookType.DOCX      -> Icons.Outlined.Description
+        BookType.MARKDOWN  -> Icons.Outlined.Code
+        BookType.HTML      -> Icons.Outlined.Code
+        BookType.CLIPBOARD -> Icons.Outlined.ContentPaste
     }
 
     Card(
