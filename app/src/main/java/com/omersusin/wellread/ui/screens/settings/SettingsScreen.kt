@@ -120,13 +120,13 @@ fun SettingsScreen(
             // ── Default Mode ────────────────────────────────────────────────
             SettingsSectionHeader(icon = Icons.Outlined.Bolt, title = "Default Reading Mode")
             SettingsCard {
-                ReadingMode.values().forEachIndexed { index, mode ->
+                ReadingMode.entries.forEachIndexed { index, mode ->
                     ModeSelectionRow(
                         mode     = mode,
                         selected = prefs.defaultMode == mode,
                         onClick  = { viewModel.setDefaultMode(mode) }
                     )
-                    if (index < ReadingMode.values().size - 1) {
+                    if (index < ReadingMode.entries.size - 1) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(0.12f))
                     }
                 }

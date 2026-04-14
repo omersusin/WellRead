@@ -249,7 +249,7 @@ fun SentenceSwipeModeContent(
 
             // Swipe hint
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("← swipe →", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("swipe to navigate", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("to navigate", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
             }
 

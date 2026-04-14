@@ -110,12 +110,12 @@ class ReaderViewModel @Inject constructor(
                 else
                     ParseResult.Error("Clipboard content is empty")
             }
-            BookType.PDF      -> fetchFileText(book.filePath, "PDF")
-            BookType.EPUB     -> fetchFileText(book.filePath, "EPUB")
-            BookType.TXT      -> fetchFileText(book.filePath, "TXT")
-            BookType.DOCX     -> fetchFileText(book.filePath, "DOCX")
-            BookType.HTML     -> fetchFileText(book.filePath, "HTML")
-            BookType.MARKDOWN -> fetchFileText(book.filePath, "MD")
+            BookType.PDF      -> if (book.content.isNotBlank()) ParseResult.Success(book.content, TextProcessor.countWords(book.content)) else fetchFileText(book.filePath, "PDF")
+            BookType.EPUB     -> if (book.content.isNotBlank()) ParseResult.Success(book.content, TextProcessor.countWords(book.content)) else fetchFileText(book.filePath, "EPUB")
+            BookType.TXT      -> if (book.content.isNotBlank()) ParseResult.Success(book.content, TextProcessor.countWords(book.content)) else fetchFileText(book.filePath, "TXT")
+            BookType.DOCX     -> if (book.content.isNotBlank()) ParseResult.Success(book.content, TextProcessor.countWords(book.content)) else fetchFileText(book.filePath, "DOCX")
+            BookType.HTML     -> if (book.content.isNotBlank()) ParseResult.Success(book.content, TextProcessor.countWords(book.content)) else fetchFileText(book.filePath, "HTML")
+            BookType.MARKDOWN -> if (book.content.isNotBlank()) ParseResult.Success(book.content, TextProcessor.countWords(book.content)) else fetchFileText(book.filePath, "MD")
         }
 
         when (result) {

@@ -121,7 +121,7 @@ fun LibraryScreen(
                 contentPadding        = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(BookFilter.values()) { filter ->
+                items(BookFilter.entries) { filter ->
                     FilterChip(
                         selected = uiState.selectedFilter == filter,
                         onClick  = { viewModel.onFilterSelected(filter) },

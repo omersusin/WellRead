@@ -143,8 +143,8 @@ class LibraryViewModel @Inject constructor(
                                 type       = type,
                                 filePath   = uri.toString(),
                                 totalWords = result.wordCount,
-                                // For non-file types we cache content; for files we re-parse
-                                content    = ""
+                                // Parsed content cache'lendi — okuyucu bunu kullanir, URI izni gerekmez
+                                content    = result.text
                             )
                         )
                     }

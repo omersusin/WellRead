@@ -230,7 +230,7 @@ private fun ReadingModesSection(onModeSelected: (ReadingMode) -> Unit) {
         Spacer(modifier = Modifier.height(12.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ModeCard(modifier = Modifier.weight(1f), mode = ReadingMode.BIONIC,
-                description = "Bold focus", onClick = { onModeSelected(ReadingMode.BIONIC) })
+                description = "Bold fixation", onClick = { onModeSelected(ReadingMode.BIONIC) })
             ModeCard(modifier = Modifier.weight(1f), mode = ReadingMode.FLASH,
                 description = "RSVP speed", onClick = { onModeSelected(ReadingMode.FLASH) })
             ModeCard(modifier = Modifier.weight(1f), mode = ReadingMode.FOCUS,
@@ -238,10 +238,18 @@ private fun ReadingModesSection(onModeSelected: (ReadingMode) -> Unit) {
         }
         Spacer(modifier = Modifier.height(10.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ModeCard(modifier = Modifier.weight(1f), mode = ReadingMode.CHUNK,
+                description = "Multi-word", onClick = { onModeSelected(ReadingMode.CHUNK) })
+            ModeCard(modifier = Modifier.weight(1f), mode = ReadingMode.PARAGRAPH,
+                description = "One block", onClick = { onModeSelected(ReadingMode.PARAGRAPH) })
             ModeCard(modifier = Modifier.weight(1f), mode = ReadingMode.TRAIN,
-                description = "Eye exercises", onClick = { onModeSelected(ReadingMode.TRAIN) })
+                description = "Eye train", onClick = { onModeSelected(ReadingMode.TRAIN) })
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ModeCard(modifier = Modifier.weight(1f), mode = ReadingMode.SENTENCE_SWIPE,
-                description = "Sentence slide", onClick = { onModeSelected(ReadingMode.SENTENCE_SWIPE) })
+                description = "Swipe sentences", onClick = { onModeSelected(ReadingMode.SENTENCE_SWIPE) })
+            Spacer(modifier = Modifier.weight(2f))
         }
     }
 }

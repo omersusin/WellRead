@@ -335,7 +335,7 @@ private fun ModeSelectorSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                ReadingMode.values().forEach { mode ->
+                ReadingMode.entries.forEach { mode ->
                     val selected = mode == currentMode
                     val animatedAlpha by animateFloatAsState(
                         targetValue = if (selected) 1f else 0f,
