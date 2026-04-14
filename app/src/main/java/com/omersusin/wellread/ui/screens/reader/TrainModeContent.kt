@@ -15,10 +15,10 @@ import com.omersusin.wellread.ui.theme.*
 import kotlinx.coroutines.delay
 
 enum class TrainExercise(val label: String, val description: String, val emoji: String) {
-    WORD_FLASH("Word Flash", "Focus on words without sub-vocalizing"),
-    EYE_MOVEMENT("Eye Movement", "Train your eyes to move smoothly"),
-    PERIPHERAL("Peripheral Vision", "Expand your reading width"),
-    COLUMN_SCROLL("Column Read", "Simulate natural book reading")
+    WORD_FLASH("Word Flash", "Focus on words without sub-vocalizing", "⚡"),
+    EYE_MOVEMENT("Eye Movement", "Train your eyes to move smoothly", "👁️"),
+    PERIPHERAL("Peripheral Vision", "Expand your reading width", "🔭"),
+    COLUMN_SCROLL("Column Read", "Simulate natural book reading", "📜")
 }
 
 @Composable
@@ -33,13 +33,13 @@ fun TrainModeContent(uiState: ReaderUiState) {
     ) {
         // Exercise selector tabs
         ScrollableTabRow(
-            selectedTabIndex = TrainExercise.values().indexOf(currentExercise),
+            selectedTabIndex = TrainExercise.entries.indexOf(currentExercise),
             edgePadding = 0.dp,
             containerColor = Color.Transparent,
             contentColor = TrainColor,
             divider = {}
         ) {
-            TrainExercise.values().forEachIndexed { index, exercise ->
+            TrainExercise.entries.forEachIndexed { index, exercise ->
                 Tab(
                     selected = currentExercise == exercise,
                     onClick = {
